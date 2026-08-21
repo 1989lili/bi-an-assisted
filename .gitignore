@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Node（依赖与构建产物）
+node_modules/
+dist/
+
+# 运行时数据（SQLite）
+data/
+
+# IDE
+.idea/
+.vscode/
