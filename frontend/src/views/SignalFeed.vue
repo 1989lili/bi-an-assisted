@@ -39,25 +39,25 @@
           <van-icon :name="showPool ? 'arrow-up' : 'arrow-down'" />
         </span>
       </div>
+      <!-- 引擎过滤入口：始终可见，不受候选池折叠影响（易发现性优化） -->
+      <div class="pool-filter" @click.stop="showRejections = !showRejections">
+        <span>看引擎过滤 {{ rejectionList.length }} 条</span>
+        <van-icon :name="showRejections ? 'arrow-up' : 'arrow-down'" />
+      </div>
       <template v-if="showPool">
         <div class="pool-chips">
           <span v-for="s in reportCandidates" :key="s" class="chip" :class="{ rejected: rejectMap[s] }">
             {{ shortSymbol(s) }}
           </span>
         </div>
-        <!-- 否决原因（引擎工作证据） -->
-        <div class="pool-filter" @click.stop="showRejections = !showRejections">
-          <span>看引擎过滤 {{ rejectionList.length }} 条</span>
-          <van-icon :name="showRejections ? 'arrow-up' : 'arrow-down'" />
-        </div>
-        <div v-if="showRejections" class="rejections">
-          <div v-for="r in rejectionList" :key="r.symbol" class="rej-row">
-            <span class="rej-symbol">{{ shortSymbol(r.symbol) }}</span>
-            <span class="rej-reason">{{ r.reason }}</span>
-          </div>
-          <div v-if="!rejectionList.length" class="rej-empty">本轮暂无否决记录</div>
-        </div>
       </template>
+      <div v-if="showRejections" class="rejections">
+        <div v-for="r in rejectionList" :key="r.symbol" class="rej-row">
+          <span class="rej-symbol">{{ shortSymbol(r.symbol) }}</span>
+          <span class="rej-reason">{{ r.reason }}</span>
+        </div>
+        <div v-if="!rejectionList.length" class="rej-empty">本轮暂无否决记录</div>
+      </div>
     </div>
 
     <!-- 信号列表：有效置顶，过期/止损沉底分组展示 -->
@@ -202,8 +202,10 @@ onUnmounted(() => clearInterval(timer));
 }
 .pool-toggle { color: #ff9f1c; display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .pool-filter {
-  display: flex; justify-content: center; align-items: center; gap: 2px;
-  font-size: 12px; color: #ff9f1c; padding: 6px 0 2px;
+  display: flex; justify-content: center; align-items: center; gap: 4px;
+  font-size: 12px; color: #ff9f1c; padding: 6px 0;
+  background: rgba(255, 159, 28, 0.06); border-radius: 6px;
+  margin-top: 2px; cursor: pointer; user-select: none;
 }
 .pool-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {

@@ -207,6 +207,7 @@ def update_setting(key: str, payload: SettingValue) -> dict:
         raise HTTPException(status_code=400, detail="无效配置项")
     setattr(config, key, payload.value)
     db.set_setting(key, str(payload.value))
+    config.save_setting(key, payload.value)  # 持久化到 data/settings.json（重启仍生效）
     return {"ok": True, "key": key, "value": payload.value}
 
 

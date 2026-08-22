@@ -2,7 +2,11 @@
 
 后续设置页将支持写入 data/settings.json 覆盖默认值，优先级：settings.json > 本文件。
 """
+import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------- 基础 ----------
 # 币安 API 本地代理（大陆直连超时，必配；可在 data/settings.json 中覆盖）
@@ -85,3 +89,47 @@ DEFAULT_WATCHLIST = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]  # 初�
 
 # ---------- 宏观静默期 ----------
 MACRO_SILENCE_MINUTES = 15         # 数据公布前后各 15 分钟暂停开仓
+
+
+# ---------- settings.json 覆盖（优先级：settings.json > 本文件） ----------
+def _settings_path() -> Path:
+    return DATA_DIR / "settings.json"
+
+
+def load_settings_override() -> None:
+    """启动时读取 data/settings.json 中的用户覆盖项，覆盖本模块默认常量。
+
+    仅覆盖「大写命名且已存在」的键，避免写入内部路径/临时键造成损坏。
+    文件不存在或解析失败时静默返回（使用默认值）。
+    """
+    p = _settings_path()
+    if not p.exists():
+        return
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("settings.json 读取失败，使用默认配置")  # noqa: F821
+        return
+    for k, v in data.items():
+        if k.isupper() and k in globals():
+            globals()[k] = v
+
+
+def save_setting(key: str, value: object) -> None:
+    """持久化单个配置到 data/settings.json（写入后由 load_settings_override 覆盖生效）。
+
+    只记录用户主动覆盖的键；值可为数值/字符串等 JSON 标量。
+    """
+    p = _settings_path()
+    data: dict = {}
+    if p.exists():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+    data[key] = value
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+# 模块导入时立即加载用户覆盖（config 被 import 时生效，main 启动即用最新值）
+load_settings_override()
