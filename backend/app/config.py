@@ -100,6 +100,7 @@ EXEC_MARKET_PCT = 0.7              # 市价入场 70%
 EXEC_LIMIT_PCT = 0.3               # 限价加仓 30%
 EXEC_LIMIT_TTL_BARS = 3            # 加仓单 3 根 15m K 线（45 分钟）未成交撤单
 SIGNAL_TTL_BARS = 3                # 信号有效期 3 根 15m K 线
+SIGNAL_COOLDOWN_MINUTES = 30       # 信号冷却：同 symbol/direction/strategy 止损/过期后 30 分钟内不重生成（H8 去重）
 
 # ---------- 止损三段式 ----------
 SL_INIT_COEF = 2.0                 # 阶段一：初始止损 2.0×ATR（带宽扩张档）

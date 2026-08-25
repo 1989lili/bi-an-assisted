@@ -142,6 +142,32 @@ def save_signal(card) -> None:
         )
 
 
+def has_active_signal(symbol: str, direction: str, strategy_pat: str) -> bool:
+    """该 symbol/direction/strategy 是否存在活跃信号（未止损/未过期/未作废）。"""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM signals "
+            "WHERE symbol = ? AND direction = ? AND status IN ('pending_confirm','confirmed') "
+            "AND card_json LIKE ?",
+            (symbol, direction, strategy_pat),
+        ).fetchone()
+    return int(row["c"]) > 0
+
+
+def recent_closed_within(symbol: str, direction: str, strategy_pat: str, within_ms: int) -> bool:
+    """该 symbol/direction/strategy 最近止损/过期信号是否落在 within_ms 冷却窗口内。"""
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT MAX(created_at) AS m FROM signals "
+            "WHERE symbol = ? AND direction = ? AND status IN ('stopped_out','expired') "
+            "AND card_json LIKE ?",
+            (symbol, direction, strategy_pat),
+        ).fetchone()
+    m = row["m"]
+    return bool(m and (now_ms - int(m)) < within_ms)
+
+
 def get_active_signals() -> list[dict]:
     with _lock, _connect() as conn:
         rows = conn.execute(

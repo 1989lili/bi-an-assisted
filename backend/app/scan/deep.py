@@ -96,9 +96,12 @@ class DeepScanner:
 
         signal = self.engine.evaluate(symbol, klines, market_env, funding_history, oi_change, zones)
         if signal is not None:
-            db.save_signal(signal)
-            found.append(signal)
-            logger.info("🔥 信号: %s %s | %s 分 | %s", signal.symbol, signal.direction, signal.confidence, signal.reason)
+            if self._should_emit(symbol, signal.direction, "short"):
+                db.save_signal(signal)
+                found.append(signal)
+                logger.info("🔥 信号: %s %s | %s 分 | %s", signal.symbol, signal.direction, signal.confidence, signal.reason)
+            else:
+                logger.debug("短线信号去重跳过 %s %s", symbol, signal.direction)
         else:
             logger.debug("无信号 %s: %s", symbol, self.engine.rejections.get(symbol, ""))
 
@@ -107,6 +110,15 @@ class DeepScanner:
         if ema_signal is not None:
             found.append(ema_signal)
         return found
+
+    def _should_emit(self, symbol: str, direction: str, strategy: str) -> bool:
+        """H8 去重 + 冷却：已有活跃信号或近期刚止损/过期，则不重复生成。"""
+        pat = f'%"strategy": "{strategy}"%'
+        if db.has_active_signal(symbol, direction, pat):
+            return False
+        if db.recent_closed_within(symbol, direction, pat, config.SIGNAL_COOLDOWN_MINUTES * 60_000):
+            return False
+        return True
 
     def _scan_ema_trend(self, symbol: str, klines: dict):
         """策略一：EMA 趋势跟踪评估。趋势周期 K 线不足时补拉（EMA200 需充足预热）。"""
@@ -125,6 +137,9 @@ class DeepScanner:
 
         res = ema_eval({trend_key: trend_df, entry_key: entry_df})
         if res is None:
+            return None
+        if not self._should_emit(symbol, res["direction"], "ema_trend"):
+            logger.debug("策略一信号去重跳过 %s %s", symbol, res["direction"])
             return None
 
         from ..signal.engine import SignalCard
