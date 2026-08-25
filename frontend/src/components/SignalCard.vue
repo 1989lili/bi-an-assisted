@@ -6,6 +6,7 @@
         {{ card.direction === "long" ? "做多" : "做空" }}
       </span>
       <span class="symbol">{{ shortSymbol(card.symbol) }}</span>
+      <span class="strat-chip" v-if="card.strategy === 'ema_trend'">EMA趋势</span>
       <span class="trigger-chip" v-if="card.trigger_level">
         {{ levelText }}
       </span>
@@ -177,6 +178,10 @@ function okClass(v) {
 .dir-badge.long { background: rgba(52, 199, 89, 0.18); color: #34c759; }
 .dir-badge.short { background: rgba(255, 69, 58, 0.18); color: #ff453a; }
 .symbol { font-size: 16px; font-weight: 700; }
+.strat-chip {
+  font-size: 11px; padding: 1px 6px; border-radius: 4px;
+  background: rgba(0, 122, 255, 0.15); color: #0a84ff;
+}
 .trigger-chip {
   font-size: 11px; padding: 1px 6px; border-radius: 4px;
   background: rgba(255, 159, 28, 0.15); color: #ff9f1c;

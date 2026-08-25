@@ -43,12 +43,17 @@ class SignalCard:
     expires_at: int = 0
     status: str = "pending_confirm"  # pending_confirm/confirmed/expired/stopped_out
     id: str = ""
+    strategy: str = "short"           # short（短线扳机）/ ema_trend（策略一趋势跟踪）
     live_price: Optional[float] = None    # 高频监控：最新价（60s 更新）
     live_updated_at: Optional[int] = None  # 最新价更新时间（ms）
 
     def __post_init__(self) -> None:
         self.id = f"sig_{self.created_at}_{self.symbol.replace('/', '').replace(':', '')}_{self.direction}"
-        self.expires_at = self.created_at + config.SIGNAL_TTL_BARS * _BAR_MS
+        if self.strategy == "ema_trend":
+            # 策略一出场由 EMA50/吊灯/时间止损判定，不按短线有效期作废
+            self.expires_at = self.created_at + 90 * 24 * 3600 * 1000
+        else:
+            self.expires_at = self.created_at + config.SIGNAL_TTL_BARS * _BAR_MS
 
     def to_dict(self) -> dict:
         return {
@@ -64,6 +69,7 @@ class SignalCard:
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "status": self.status,
+            "strategy": self.strategy,
             "live_price": self.live_price,
             "live_updated_at": self.live_updated_at,
         }

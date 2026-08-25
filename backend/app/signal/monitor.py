@@ -10,6 +10,7 @@ import logging
 import time
 from typing import Callable, Optional
 
+from .. import config
 from ..store import db
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,13 @@ logger = logging.getLogger(__name__)
 _MONITORED_STATUSES = ("pending_confirm", "confirmed")
 # 实时价变化超过 0.01% 才视为更新（避免无意义刷新）
 _PRICE_CHANGE_RATIO = 0.0001
+
+
+def _entry_bar_ms() -> int:
+    """策略一入场周期单根 K 线毫秒数（时间止损用）。"""
+    tf = config.EMA_TREND_TIMEFRAMES["entry"]
+    minutes = {"5m": 5, "15m": 15, "1h": 60, "4h": 240}.get(tf, 15)
+    return minutes * 60 * 1000
 
 
 class SignalMonitor:
@@ -50,6 +58,9 @@ class SignalMonitor:
 
     def _update(self, sig: dict) -> Optional[dict]:
         now_ms = int(time.time() * 1000)
+        # 策略一（EMA 趋势跟踪）：走三层出场判定（吊灯 / EMA50 / 时间止损）
+        if sig.get("strategy") == "ema_trend":
+            return self._update_ema_trend(sig, now_ms)
         # ① 超时 → expired（3 根 15m K 线）
         if now_ms >= sig.get("expires_at", 0):
             return self._save(sig, status="expired")
@@ -81,6 +92,37 @@ class SignalMonitor:
         if old is None or abs(live - old) / old > _PRICE_CHANGE_RATIO:
             return self._save(sig, status=sig.get("status") or "pending_confirm", live=live)
         return None
+
+    # ---------- 策略一（EMA 趋势跟踪）出场判定 ----------
+
+    def _update_ema_trend(self, sig: dict, now_ms: int) -> Optional[dict]:
+        """拉入场周期 K 线 → 更新持仓期最高/最低收盘 → 三层出场（吊灯 / EMA50 / 时间止损）。"""
+        entry_key = config.EMA_TREND_TIMEFRAMES["entry"]
+        try:
+            df = self.fetcher.fetch_ohlcv(sig["symbol"], entry_key, use_cache=False, limit=60)
+            if df is None or len(df) < 20:
+                return None
+            last_close = float(df["close"].iloc[-1])
+        except Exception as exc:  # noqa: BLE001 - 单信号失败不影响其他信号
+            logger.warning("策略一监控拉取失败 %s: %s", sig["symbol"], exc)
+            return None
+
+        exec_ = sig.setdefault("execution", {})
+        prev_high = exec_.get("highest_close") or last_close
+        prev_low = exec_.get("lowest_close") or last_close
+        exec_["highest_close"] = max(prev_high, last_close)
+        exec_["lowest_close"] = min(prev_low, last_close)
+
+        bar_ms = _entry_bar_ms()
+        elapsed = int((now_ms - sig.get("created_at", now_ms)) / bar_ms) if bar_ms else None
+
+        from ..strategy.ema_trend import check_exit
+
+        reason = check_exit(sig, df, elapsed_bars=elapsed)
+        if reason:
+            sig["reason"] = f"{sig.get('reason', '')}｜离场：{reason}"
+            return self._save(sig, status="stopped_out", live=last_close)
+        return self._save(sig, status=sig.get("status") or "confirmed", live=last_close)
 
     def _save(self, sig: dict, status: str, live: Optional[float] = None) -> dict:
         """更新状态/实时价并落库（INSERT OR REPLACE 全量覆盖）。"""

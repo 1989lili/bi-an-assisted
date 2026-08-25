@@ -41,9 +41,7 @@ class DeepScanner:
         with ThreadPoolExecutor(max_workers=config.SCAN_CONCURRENCY) as ex:
             futures = {ex.submit(self._scan_symbol, sym, market_env): sym for sym in pool}
             for fut in as_completed(futures):
-                signal = fut.result()
-                if signal is not None:
-                    signals.append(signal)
+                signals.extend(fut.result() or [])
         logger.info(
             "精扫完成: 候选池 %s 个，信号 %s 条，耗时 %.1fs",
             len(pool), len(signals), time.monotonic() - t0,
@@ -87,9 +85,11 @@ class DeepScanner:
         for tf in config.TIMEFRAMES.values():
             df = self.fetcher.fetch_ohlcv(symbol, tf)
             if df is None or df.empty:
-                return None
+                return []
             klines[tf] = df
 
+        found: list = []
+        # 现有引擎（短线扳机）
         oi_change = self._oi_change(symbol)
         funding_history = db.get_funding_history(symbol, hours=24)
         zones = estimate_liquidity_zones(klines["15m"])
@@ -97,10 +97,65 @@ class DeepScanner:
         signal = self.engine.evaluate(symbol, klines, market_env, funding_history, oi_change, zones)
         if signal is not None:
             db.save_signal(signal)
+            found.append(signal)
             logger.info("🔥 信号: %s %s | %s 分 | %s", signal.symbol, signal.direction, signal.confidence, signal.reason)
         else:
             logger.debug("无信号 %s: %s", symbol, self.engine.rejections.get(symbol, ""))
-        return signal
+
+        # 策略一（EMA 趋势跟踪）
+        ema_signal = self._scan_ema_trend(symbol, klines)
+        if ema_signal is not None:
+            found.append(ema_signal)
+        return found
+
+    def _scan_ema_trend(self, symbol: str, klines: dict):
+        """策略一：EMA 趋势跟踪评估。趋势周期 K 线不足时补拉（EMA200 需充足预热）。"""
+        from ..strategy.ema_trend import evaluate as ema_eval
+
+        trend_key = config.EMA_TREND_TIMEFRAMES["trend"]
+        entry_key = config.EMA_TREND_TIMEFRAMES["entry"]
+        entry_df = klines.get(entry_key)
+        if entry_df is None or entry_df.empty:
+            return None
+        trend_df = klines.get(trend_key)
+        if trend_df is None or len(trend_df) < 220:
+            trend_df = self.fetcher.fetch_ohlcv(symbol, trend_key, limit=250)
+            if trend_df is None or len(trend_df) < 220:
+                return None
+
+        res = ema_eval({trend_key: trend_df, entry_key: entry_df})
+        if res is None:
+            return None
+
+        from ..signal.engine import SignalCard
+
+        last_close = float(entry_df["close"].iloc[-1])
+        exec_plan = {
+            "market_price": round(last_close, 8),
+            "market_pct": int(config.EXEC_MARKET_PCT * 100),
+            "limit_pct": int(config.EXEC_LIMIT_PCT * 100),
+            "limit_price": round((float(entry_df["high"].iloc[-2]) + float(entry_df["low"].iloc[-2])) / 2, 8),
+            "atr": round(res["atr"], 8),
+            "highest_close": last_close,
+            "lowest_close": last_close,
+            "position_factor": 1.0,
+            "limit_ttl_bars": config.EXEC_LIMIT_TTL_BARS,
+        }
+        card = SignalCard(
+            symbol=symbol,
+            direction=res["direction"],
+            confidence=res["confidence"],
+            levels={"strategy": "ema_trend"},
+            trigger_level="",
+            funding={"tier": "unknown", "rate": None, "position_factor": 1.0},
+            execution=exec_plan,
+            reason=res["reason"],
+            strategy="ema_trend",
+        )
+        card.status = "confirmed"  # 策略一收盘确认即视为入场
+        db.save_signal(card)
+        logger.info("🌊 EMA趋势信号: %s %s | %s 分 | %s", symbol, res["direction"], res["confidence"], res["reason"])
+        return card
 
     def _oi_change(self, symbol: str) -> Optional[float]:
         """OI 近 30 分钟变化率（最近 6 根 5m 数据）。"""
