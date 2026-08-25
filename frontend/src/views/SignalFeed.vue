@@ -60,13 +60,9 @@
       </div>
     </div>
 
-    <!-- 信号列表：有效置顶，过期/止损沉底分组展示 -->
-    <van-empty v-if="!loading && signals.length === 0" description="暂无入场信号（引擎持续监控中，触发后会实时推送）" />
+    <!-- 信号列表：只显示当前有效信号（过期/止损者不显示） -->
+    <van-empty v-if="!loading && activeSignals.length === 0" description="暂无有效信号（引擎持续监控中，触发后实时推送）" />
     <div v-for="card in activeSignals" :key="card.id" class="signal-item" :class="{ fresh: card.id === newestId }">
-      <SignalCard :card="card" />
-    </div>
-    <div v-if="deadSignals.length" class="sig-sep">历史信号（{{ deadSignals.length }}，已过期/止损）</div>
-    <div v-for="card in deadSignals" :key="card.id" class="signal-item">
       <SignalCard :card="card" />
     </div>
   </div>
@@ -102,7 +98,16 @@ function sigRank(card) {
 function sortSignals(list) {
   return [...list].sort((a, b) => sigRank(a) - sigRank(b) || b.created_at - a.created_at);
 }
-const activeSignals = computed(() => signals.value.filter((s) => sigRank(s) === 1));
+const activeSignals = computed(() => {
+  // 只显示有效信号；并按 symbol+direction+strategy 收敛，只保留最新一条（去历史重复/堆积）
+  const list = signals.value.filter((s) => sigRank(s) === 1);
+  const seen = new Map();
+  for (const s of [...list].sort((a, b) => b.created_at - a.created_at)) {
+    const key = `${s.symbol}|${s.direction}|${s.strategy || "short"}`;
+    if (!seen.has(key)) seen.set(key, s);
+  }
+  return [...seen.values()];
+});
 const deadSignals = computed(() => signals.value.filter((s) => sigRank(s) === 2));
 const rejectionList = computed(() =>
   Object.entries(rejections.value)

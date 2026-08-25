@@ -45,8 +45,10 @@ TRIGGER_MOMENTUM_BARS = 3
 # ---------- 策略一：EMA 趋势跟踪（N0.7，适合单边行情） ----------
 EMA_TREND_TIMEFRAMES = {"trend": "4h", "entry": "15m"}  # 可配置周期对（默认 4h+15m，可切 1h+5m）
 EMA_TREND_FAST, EMA_TREND_MID, EMA_TREND_LONG = 20, 50, 200  # 短/中/长均线
-EMA_TREND_VOL_MULT = 1.2           # 成交量 > 20 周期均量 × 该值
-EMA_TREND_RETRACE_LOOKBACK = 5     # 回踩判定：近 N 根内曾触及 EMA20/50
+EMA_TREND_VOL_MULT = 1.5           # 成交量 > 20 周期均量 × 该值（收紧：1.2→1.5，放量更明确）
+EMA_TREND_RETRACE_LOOKBACK = 5     # 回踩判定：近 N 根内曾触及 EMA20
+EMA_TREND_ENTRY_NEAR_ATR = 2.0     # 入场价与 EMA20 距离 ≤ 2×ATR（不追远离均线）
+EMA_TREND_RSI_MIN, EMA_TREND_RSI_MAX = 32, 68  # RSI 顺势区间（多头 50~68，空头 32~50，不追超买超卖）
 # 策略一出场（三层，monitor 判定，收盘价为准）
 EMA_TREND_EXIT_ATR = 3.0           # ① 吊灯止损：持仓期最高/最低收盘价 ∓ N×ATR
 EMA_TREND_TIME_BARS = 48           # ③ 时间止损：入场后 N 根入场周期 K 线未创新高/新低 → 离场
