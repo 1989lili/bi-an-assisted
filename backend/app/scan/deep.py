@@ -130,12 +130,19 @@ class DeepScanner:
         from ..signal.engine import SignalCard
 
         last_close = float(entry_df["close"].iloc[-1])
+        atr_v = res["atr"]
+        # 初始吊灯止损（三层出场①）：入场价 ∓ 3×ATR，作为卡面展示的参考止损
+        stop_loss = (last_close - config.EMA_TREND_EXIT_ATR * atr_v) if res["direction"] == "long" \
+            else (last_close + config.EMA_TREND_EXIT_ATR * atr_v)
         exec_plan = {
             "market_price": round(last_close, 8),
             "market_pct": int(config.EXEC_MARKET_PCT * 100),
             "limit_pct": int(config.EXEC_LIMIT_PCT * 100),
             "limit_price": round((float(entry_df["high"].iloc[-2]) + float(entry_df["low"].iloc[-2])) / 2, 8),
-            "atr": round(res["atr"], 8),
+            "stop_loss": round(stop_loss, 8),
+            "target": None,          # 趋势跟踪：无固定止盈点位
+            "risk_reward": None,     # 无固定盈亏比
+            "atr": round(atr_v, 8),
             "highest_close": last_close,
             "lowest_close": last_close,
             "position_factor": 1.0,

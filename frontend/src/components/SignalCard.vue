@@ -18,7 +18,7 @@
       <span class="meta-time">{{ fmtTime(card.created_at) }}</span>
       <span class="status-badge" :class="statusClass">{{ statusText }}</span>
       <span class="ttl" :class="{ warn: ttlMin < 10 }" v-if="!expired">
-        有效 {{ ttlMin }}min
+        {{ card.strategy === "ema_trend" ? "趋势跟踪" : `有效 ${ttlMin}min` }}
       </span>
     </div>
 
@@ -59,15 +59,15 @@
         <span class="exec-cell stop">
           <i>止损</i>{{ fmtPrice(card.execution?.stop_loss) }} {{ quote }}
         </span>
-        <span class="exec-cell" v-if="card.execution?.target">
-          <i>目标</i>{{ fmtPrice(card.execution.target) }} {{ quote }}
+        <span class="exec-cell" v-if="card.execution?.target || card.strategy === 'ema_trend'">
+          <i>目标</i>{{ card.execution?.target ? fmtPrice(card.execution.target) : '随趋势(EMA50)' }} {{ quote }}
         </span>
       </div>
     </div>
 
     <!-- 行7 底部：盈亏比 + 费率档位 + 一键执行 -->
     <div class="foot">
-      <span class="rr">盈亏比 {{ rr }}</span>
+      <span class="rr">{{ card.strategy === "ema_trend" ? "盈亏比 趋势跟踪" : `盈亏比 ${rr}` }}</span>
       <span class="funding" :style="{ color: FUNDING_TIER[card.funding?.tier]?.color }">
         {{ FUNDING_TIER[card.funding?.tier]?.text || "费率" }}
         <template v-if="card.funding?.rate"> {{ fmtPct(card.funding.rate, 3) }}</template>
