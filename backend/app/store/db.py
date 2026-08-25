@@ -168,6 +168,13 @@ def recent_closed_within(symbol: str, direction: str, strategy_pat: str, within_
     return bool(m and (now_ms - int(m)) < within_ms)
 
 
+def clear_signals() -> int:
+    """清空全部信号（历史复盘数据一并清除）。返回删除条数。"""
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM signals")
+        return cur.rowcount
+
+
 def get_active_signals() -> list[dict]:
     with _lock, _connect() as conn:
         rows = conn.execute(
