@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from .api.routes import router
 from .calendar.macro import seed_builtin_events
 from .data.fetcher import BinanceFetcher
+from .executor.binance import BinanceExecutor
 from .notify.ws import manager
 from .scan.coarse import CoarseScanner
 from .scan.deep import DeepScanner
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     coarse = CoarseScanner(fetcher)
     deep = DeepScanner(fetcher, coarse)
     monitor = SignalMonitor(fetcher)
+    executor = BinanceExecutor()
 
     def on_scan_complete(signals: list) -> None:
         """每轮精扫完成：广播信号与扫描报告。"""
@@ -73,6 +75,7 @@ async def lifespan(app: FastAPI):
     app.state.coarse = coarse
     app.state.deep = deep
     app.state.monitor = monitor
+    app.state.executor = executor
     app.state.scheduler = scheduler
 
     # WS 广播绑定主事件循环（调度线程经 run_coroutine_threadsafe 提交）
