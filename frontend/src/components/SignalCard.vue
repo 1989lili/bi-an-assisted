@@ -65,7 +65,7 @@
       </div>
     </div>
 
-    <!-- 行7 底部：盈亏比 + 费率档位 -->
+    <!-- 行7 底部：盈亏比 + 费率档位 + 一键执行 -->
     <div class="foot">
       <span class="rr">盈亏比 {{ rr }}</span>
       <span class="funding" :style="{ color: FUNDING_TIER[card.funding?.tier]?.color }">
@@ -75,16 +75,21 @@
           ·仓位×{{ card.funding.position_factor }}
         </template>
       </span>
+      <van-button v-if="canExecute" size="mini" type="primary" class="exec-btn" :disabled="executing" @click="onExecute">
+        {{ executing ? "执行中…" : "确认执行" }}
+      </van-button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { showConfirmDialog, showToast } from "vant";
 import {
   fmtClock, fmtPct, fmtPrice, fmtTime, shortSymbol, quoteSymbol,
   FUNDING_TIER, LEVEL_LABEL,
 } from "../utils/format";
+import { api } from "../api/http";
 
 const props = defineProps({ card: Object });
 
@@ -145,6 +150,32 @@ const levelText = computed(() =>
 const confClass = computed(() =>
   props.card.confidence >= 70 ? "high" : props.card.confidence >= 50 ? "mid" : "low",
 );
+
+// 一键执行：仅有效且未执行过的信号可点（dry_run 下为纸面模拟）
+const canExecute = computed(() =>
+  !props.card.executed && props.card.status !== "stopped_out" && props.card.status !== "expired"
+    && now.value <= (props.card.expires_at || 0),
+);
+const executing = ref(false);
+async function onExecute() {
+  try {
+    await showConfirmDialog({
+      title: "确认执行",
+      message: `确认对 ${shortSymbol(props.card.symbol)} 下达 ${props.card.direction === "long" ? "做多" : "做空"} 市价单？`,
+    });
+  } catch (_) {
+    return;
+  }
+  executing.value = true;
+  try {
+    const r = await api.executeSignal(props.card.id);
+    showToast(r.dry_run ? "纸面模拟下单成功" : `实盘下单成功（${r.side} ${r.amount}）`);
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    executing.value = false;
+  }
+}
 function okClass(v) {
   if (v === true) return "ok";
   if (v === false) return "bad";
@@ -253,6 +284,7 @@ function okClass(v) {
   display: flex; justify-content: space-between; align-items: center;
   border-top: 1px solid #2c2c2e; padding-top: 8px;
 }
+.exec-btn { margin-left: auto; }
 .rr { font-size: 12px; color: #e8e8ea; font-weight: 600; }
 .funding { font-size: 12px; }
 </style>

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Optional
 
@@ -83,68 +84,72 @@ def get_signal(signal_id: str) -> dict:
     return sig
 
 
+_execute_lock = threading.Lock()  # 进程内互斥：防并发重复执行同一信号
+
+
 @router.post("/signals/{signal_id}/execute")
 def execute_signal(signal_id: str, request: Request) -> dict:
     """一键执行信号：按信号卡执行计划下单（dry_run 下仅模拟）并创建本地持仓。
 
-    幂等：已执行过的信号 id 拒绝重复下单。
+    幂等：进程内互斥锁 + executed 标记，防并发重复下单（单进程 uvicorn 下有效）。
     """
-    sig = db.get_signal(signal_id)
-    if sig is None:
-        raise HTTPException(status_code=404, detail="信号不存在")
-    if sig.get("executed"):
-        raise HTTPException(status_code=409, detail="信号已执行，请勿重复")
-    if sig.get("status") not in ("confirmed", "pending_confirm"):
-        raise HTTPException(status_code=400, detail=f"信号状态 {sig.get('status')} 不可执行")
+    with _execute_lock:
+        sig = db.get_signal(signal_id)
+        if sig is None:
+            raise HTTPException(status_code=404, detail="信号不存在")
+        if sig.get("executed"):
+            raise HTTPException(status_code=409, detail="信号已执行，请勿重复")
+        if sig.get("status") not in ("confirmed", "pending_confirm"):
+            raise HTTPException(status_code=400, detail=f"信号状态 {sig.get('status')} 不可执行")
 
-    executor = request.app.state.executor
-    if not executor.configured:
-        raise HTTPException(status_code=503, detail="未配置币安 API Key/Secret")
+        executor = request.app.state.executor
+        if not executor.configured:
+            raise HTTPException(status_code=503, detail="未配置币安 API Key/Secret")
 
-    exec_plan = sig.get("execution") or {}
-    symbol = sig["symbol"]
-    direction = sig["direction"]
-    price = float(exec_plan.get("market_price") or 0)
-    if price <= 0:
-        raise HTTPException(status_code=400, detail="信号缺少执行价格")
+        exec_plan = sig.get("execution") or {}
+        symbol = sig["symbol"]
+        direction = sig["direction"]
+        price = float(exec_plan.get("market_price") or 0)
+        if price <= 0:
+            raise HTTPException(status_code=400, detail="信号缺少执行价格")
 
-    # ---------- 风控门禁：单日开仓上限 + 单日亏损熔断 ----------
-    if db.count_positions_opened_today() >= config.BINANCE_DAILY_OPEN_LIMIT:
-        raise HTTPException(status_code=429, detail=f"当日开仓已达上限 {config.BINANCE_DAILY_OPEN_LIMIT}")
+        # ---------- 风控门禁：单日开仓上限 + 单日亏损熔断 ----------
+        if db.count_positions_opened_today() >= config.BINANCE_DAILY_OPEN_LIMIT:
+            raise HTTPException(status_code=429, detail=f"当日开仓已达上限 {config.BINANCE_DAILY_OPEN_LIMIT}")
 
-    bal = executor.fetch_balance()
-    if not bal.get("ok"):
-        raise HTTPException(status_code=503, detail=f"余额查询失败: {bal.get('error')}")
-    total = float(bal.get("total") or 0)
-    pnl_today = db.sum_realized_pnl_today()
-    if total > 0 and pnl_today < 0 and abs(pnl_today) / total >= config.BINANCE_DAILY_LOSS_LIMIT:
-        raise HTTPException(status_code=429, detail="当日亏损已达熔断线，暂停新开仓")
-    free = float(bal.get("free") or 0)
-    budget = min(free, config.BINANCE_MAX_ORDER_USDT)  # 单笔预算上限
-    amount = round(budget / price, 6)                  # 合约数量（第一版：预算/价格）
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="可用余额不足以开仓")
+        bal = executor.fetch_balance()
+        if not bal.get("ok"):
+            raise HTTPException(status_code=503, detail=f"余额查询失败: {bal.get('error')}")
+        total = float(bal.get("total") or 0)
+        pnl_today = db.sum_realized_pnl_today()
+        if total > 0 and pnl_today < 0 and abs(pnl_today) / total >= config.BINANCE_DAILY_LOSS_LIMIT:
+            raise HTTPException(status_code=429, detail="当日亏损已达熔断线，暂停新开仓")
+        free = float(bal.get("free") or 0)
+        budget = min(free, config.BINANCE_MAX_ORDER_USDT)  # 单笔预算上限
+        amount = round(budget / price, 6)                  # 合约数量（第一版：预算/价格）
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="可用余额不足以开仓")
 
-    side = "buy" if direction == "long" else "sell"
-    market = executor.create_order(symbol, side, amount, order_type="market")
-    if not market.get("ok"):
-        raise HTTPException(status_code=502, detail=f"下单失败: {market.get('error')}")
+        side = "buy" if direction == "long" else "sell"
+        market = executor.create_order(symbol, side, amount, order_type="market")
+        if not market.get("ok"):
+            raise HTTPException(status_code=502, detail=f"下单失败: {market.get('error')}")
 
-    pid = db.create_position(symbol, direction, price, amount,
-                             stop_price=exec_plan.get("stop_loss") or None, stop_stage=1,
-                             strategy=sig.get("strategy") or "short", signal_id=signal_id)
-    sig["executed"] = True
-    sig["executed_at"] = int(time.time() * 1000)
-    sig["exec_side"] = side
-    sig["exec_amount"] = amount
-    db.save_signal(sig)
+        pid = db.create_position(symbol, direction, price, amount,
+                                 stop_price=exec_plan.get("stop_loss") or None, stop_stage=1,
+                                 strategy=sig.get("strategy") or "short", signal_id=signal_id)
+        sig["executed"] = True
+        sig["executed_at"] = int(time.time() * 1000)
+        sig["exec_side"] = side
+        sig["exec_amount"] = amount
+        db.save_signal(sig)
 
-    return {
-        "ok": True, "dry_run": market.get("dry_run"), "signal_id": signal_id,
-        "position_id": pid, "side": side, "amount": amount,
-        "order_id": market.get("id"), "price": price,
-        "budget_usdt": budget, "mode": executor.mode_label,
-    }
+        return {
+            "ok": True, "dry_run": market.get("dry_run"), "signal_id": signal_id,
+            "position_id": pid, "side": side, "amount": amount,
+            "order_id": market.get("id"), "price": price,
+            "budget_usdt": budget, "mode": executor.mode_label,
+        }
 
 
 # ==================== 自选币 ====================

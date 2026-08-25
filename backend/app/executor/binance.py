@@ -116,6 +116,11 @@ class BinanceExecutor:
             }
         try:
             ex = self._client()
+            # 杠杆上限控制（≤ BINANCE_MAX_LEVERAGE，默认 3 倍；失败不阻塞下单）
+            try:
+                ex.set_leverage(config.BINANCE_MAX_LEVERAGE, symbol)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("设置杠杆失败 %s: %s", symbol, exc)
             kwargs = {}
             if order_type == "limit" and price is not None:
                 kwargs["price"] = price

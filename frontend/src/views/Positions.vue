@@ -72,6 +72,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { showToast } from "vant";
 import { api } from "../api/http";
+import { onWsEvent, startWs } from "../api/ws";
 import { fmtNum, shortSymbol } from "../utils/format";
 
 const positions = ref([]);
@@ -145,7 +146,16 @@ function actionText(p) {
   return p.action;
 }
 
-onMounted(load);
+function handleWs(event) {
+  // 自动平仓等变更 → 实时刷新持仓列表
+  if (event === "position:update") load();
+}
+
+onMounted(() => {
+  startWs();
+  onWsEvent(handleWs);
+  load();
+});
 </script>
 
 <style scoped>

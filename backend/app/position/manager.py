@@ -29,7 +29,8 @@ def evaluate_stage(
     """
     direction = position["direction"]
     entry = position["entry_price"]
-    stage = position.get("stage", 1)
+    # 兼容 db 字段名 stop_stage（避免阶段永远停在初始、三段式升级失效）
+    stage = position.get("stage", position.get("stop_stage", 1))
     stop = position.get("stop_price")
 
     # 浮盈（ATR 单位）

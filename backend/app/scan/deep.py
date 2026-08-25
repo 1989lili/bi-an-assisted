@@ -153,6 +153,7 @@ class DeepScanner:
             strategy="ema_trend",
         )
         card.status = "confirmed"  # 策略一收盘确认即视为入场
+        card.id = f"{card.id}_ema"  # 与短线策略 id 区分，避免同 symbol/方向/毫秒碰撞
         db.save_signal(card)
         logger.info("🌊 EMA趋势信号: %s %s | %s 分 | %s", symbol, res["direction"], res["confidence"], res["reason"])
         return card
