@@ -15,6 +15,8 @@ def build_scheduler(
     on_scan_complete: Optional[Callable[[list], None]] = None,
     signal_monitor=None,
     on_monitor_update: Optional[Callable[[list], None]] = None,
+    position_monitor=None,
+    on_position_change: Optional[Callable[[list], None]] = None,
 ) -> BackgroundScheduler:
     """创建后台调度器，注册粗筛、精扫与信号监控任务。
 
@@ -56,5 +58,16 @@ def build_scheduler(
             coalesce=True,
         )
         jobs.append("信号监控 %ss" % config.SIGNAL_MONITOR_INTERVAL_SEC)
+    if position_monitor is not None and on_position_change is not None:
+        position_monitor.set_on_update(on_position_change)
+        scheduler.add_job(
+            position_monitor.check,
+            "interval",
+            seconds=config.SIGNAL_MONITOR_INTERVAL_SEC,
+            id="position_monitor",
+            max_instances=1,
+            coalesce=True,
+        )
+        jobs.append("持仓风控 %ss" % config.SIGNAL_MONITOR_INTERVAL_SEC)
     logger.info("调度器已注册: %s", " / ".join(jobs))
     return scheduler

@@ -41,6 +41,9 @@ async def lifespan(app: FastAPI):
     deep = DeepScanner(fetcher, coarse)
     monitor = SignalMonitor(fetcher)
     executor = BinanceExecutor()
+    from .position.monitor import PositionMonitor
+
+    position_monitor = PositionMonitor(fetcher, executor)
 
     def on_scan_complete(signals: list) -> None:
         """每轮精扫完成：广播信号与扫描报告。"""
@@ -65,9 +68,15 @@ async def lifespan(app: FastAPI):
         if changed:
             manager.broadcast("signal:update", {"signals": changed})
 
+    def on_position_change(changed: list) -> None:
+        """持仓风控变更：平仓广播（position:update）。"""
+        if changed:
+            manager.broadcast("position:update", {"positions": changed})
+
     scheduler = build_scheduler(
         coarse, deep, on_scan_complete=on_scan_complete,
         signal_monitor=monitor, on_monitor_update=on_monitor_update,
+        position_monitor=position_monitor, on_position_change=on_position_change,
     )
 
     # 共享实例：API 路由通过 request.app.state 访问
@@ -76,6 +85,7 @@ async def lifespan(app: FastAPI):
     app.state.deep = deep
     app.state.monitor = monitor
     app.state.executor = executor
+    app.state.position_monitor = position_monitor
     app.state.scheduler = scheduler
 
     # WS 广播绑定主事件循环（调度线程经 run_coroutine_threadsafe 提交）

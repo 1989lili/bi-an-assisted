@@ -108,9 +108,17 @@ def execute_signal(signal_id: str, request: Request) -> dict:
     if price <= 0:
         raise HTTPException(status_code=400, detail="信号缺少执行价格")
 
+    # ---------- 风控门禁：单日开仓上限 + 单日亏损熔断 ----------
+    if db.count_positions_opened_today() >= config.BINANCE_DAILY_OPEN_LIMIT:
+        raise HTTPException(status_code=429, detail=f"当日开仓已达上限 {config.BINANCE_DAILY_OPEN_LIMIT}")
+
     bal = executor.fetch_balance()
     if not bal.get("ok"):
         raise HTTPException(status_code=503, detail=f"余额查询失败: {bal.get('error')}")
+    total = float(bal.get("total") or 0)
+    pnl_today = db.sum_realized_pnl_today()
+    if total > 0 and pnl_today < 0 and abs(pnl_today) / total >= config.BINANCE_DAILY_LOSS_LIMIT:
+        raise HTTPException(status_code=429, detail="当日亏损已达熔断线，暂停新开仓")
     free = float(bal.get("free") or 0)
     budget = min(free, config.BINANCE_MAX_ORDER_USDT)  # 单笔预算上限
     amount = round(budget / price, 6)                  # 合约数量（第一版：预算/价格）
@@ -123,7 +131,8 @@ def execute_signal(signal_id: str, request: Request) -> dict:
         raise HTTPException(status_code=502, detail=f"下单失败: {market.get('error')}")
 
     pid = db.create_position(symbol, direction, price, amount,
-                             stop_price=exec_plan.get("stop_loss") or None, stop_stage=1)
+                             stop_price=exec_plan.get("stop_loss") or None, stop_stage=1,
+                             strategy=sig.get("strategy") or "short", signal_id=signal_id)
     sig["executed"] = True
     sig["executed_at"] = int(time.time() * 1000)
     sig["exec_side"] = side

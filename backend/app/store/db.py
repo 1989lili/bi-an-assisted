@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS positions (
     stop_stage  INTEGER DEFAULT 1,       -- 1初始/2保本/3跟踪（M2 使用）
     stop_price  REAL,
     status      TEXT DEFAULT 'open',     -- open/closed
+    strategy    TEXT DEFAULT 'short',    -- short / ema_trend
+    signal_id   TEXT,                    -- 关联信号卡 id
+    realized_pnl REAL,                   -- 平仓时写入的已实现盈亏（USDT）
     opened_at   TEXT NOT NULL,
     closed_at   TEXT
 );
@@ -75,11 +78,24 @@ def init_db() -> None:
     """建表 + 首次初始化默认自选币。"""
     with _lock, _connect() as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
         conn.execute(
             "INSERT OR IGNORE INTO watchlist (symbol, added_at) VALUES (?, ?)",
             ("BTC/USDT:USDT", _now()),
         )
         logger.info("SQLite 初始化完成: %s", config.DB_PATH)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """旧库补列（CREATE TABLE IF NOT EXISTS 不会为已存在表加列）。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()}
+    for col, ddl in (
+        ("strategy", "ALTER TABLE positions ADD COLUMN strategy TEXT DEFAULT 'short'"),
+        ("signal_id", "ALTER TABLE positions ADD COLUMN signal_id TEXT"),
+        ("realized_pnl", "ALTER TABLE positions ADD COLUMN realized_pnl REAL"),
+    ):
+        if col not in cols:
+            conn.execute(ddl)
 
 
 def _now() -> str:
@@ -160,12 +176,13 @@ def get_signal(signal_id: str) -> dict | None:
 # ---------- 持仓 ----------
 
 def create_position(symbol: str, direction: str, entry_price: float, qty: float,
-                    stop_price: float | None = None, stop_stage: int = 1) -> int:
+                    stop_price: float | None = None, stop_stage: int = 1,
+                    strategy: str = "short", signal_id: str | None = None) -> int:
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO positions (symbol, direction, entry_price, qty, stop_stage, stop_price, status, opened_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'open', ?)",
-            (symbol, direction, entry_price, qty, stop_stage, stop_price, _now()),
+            "INSERT INTO positions (symbol, direction, entry_price, qty, stop_stage, stop_price, status, strategy, signal_id, opened_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
+            (symbol, direction, entry_price, qty, stop_stage, stop_price, strategy, signal_id, _now()),
         )
         return int(cur.lastrowid)
 
@@ -186,7 +203,8 @@ def get_position(position_id: int) -> dict | None:
 
 def update_position(position_id: int, **fields) -> bool:
     """按字段名白名单更新持仓（防注入）。"""
-    allowed = {"direction", "entry_price", "qty", "stop_stage", "stop_price", "status"}
+    allowed = {"direction", "entry_price", "qty", "stop_stage", "stop_price", "status",
+               "strategy", "signal_id", "realized_pnl", "closed_at"}
     cols = {k: v for k, v in fields.items() if k in allowed}
     if not cols:
         return False
@@ -204,6 +222,27 @@ def close_position(position_id: int) -> bool:
             (_now(), position_id),
         )
         return cur.rowcount > 0
+
+
+def count_positions_opened_today() -> int:
+    """当日开仓次数（按 opened_at 的 UTC 日期）。"""
+    prefix = _now()[:10]
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM positions WHERE opened_at LIKE ?", (prefix + "%",)
+        ).fetchone()
+    return int(row["c"])
+
+
+def sum_realized_pnl_today() -> float:
+    """当日已实现盈亏合计（按 closed_at 的 UTC 日期，平仓时写入 realized_pnl）。"""
+    prefix = _now()[:10]
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(realized_pnl), 0) AS s FROM positions WHERE closed_at LIKE ?",
+            (prefix + "%",),
+        ).fetchone()
+    return float(row["s"])
 
 
 # ---------- 宏观日历 ----------

@@ -86,7 +86,7 @@
 ### N1 执行层（一键确认小额实盘）
 - [x] N1.1 Binance 交易 API 接入（`executor/binance.py`，ccxt 封装；dry_run 纸面默认；Key/Secret 入 settings.json；GET /settings 敏感过滤已验证）
 - [x] N1.2 一键执行后端（`POST /api/signals/{id}/execute`：校验/真实余额/仓位/dry_run下单/建持仓/幂等409已验证；凭据修正 + IP白名单已打通，余额2.6USDT）【前端「确认执行」按钮待做】
-- [ ] N1.3 持仓自动风控（止损三段式自动执行 + 加仓单 TTL + 单日亏损熔断 + 开仓上限）
+- [x] N1.3 持仓自动风控（`position/monitor.py`：短线三段式 + 策略一三层出场自动平仓；单日开仓上限 + 亏损熔断；positions 表加 strategy/signal_id/realized_pnl；调度器 position_monitor 已注册）
 - [ ] N1.4 实盘复盘（真实盈亏统计）
 
 ### N2–N4（后续）
