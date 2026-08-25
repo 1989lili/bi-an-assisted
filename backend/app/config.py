@@ -36,7 +36,7 @@ BOLL_PERIOD, BOLL_STD = 20, 2
 ATR_PERIOD = 14
 VOL_MA_PERIODS = (7, 21)           # 均量线
 ADX_PERIOD = 14
-ADX_TREND_TH = 25                  # ADX>25 才开方向门
+ADX_TREND_TH = 20                  # ADX>20 才开方向门（N0.3 调低，产品文档默认 25；设置页可调，可回退）
 SWING_WINDOW = 5                   # 价格结构枢轴窗口（HH/HL 识别）
 # 扳机动量确认放宽（N0.1）：5m MACD 柱同号连续根数 ≤ 该值视为有效
 # 1 = 仅"刚翻色"（原逻辑，最严）；3 = 翻色后 3 根内延续（默认）；5 = 激进

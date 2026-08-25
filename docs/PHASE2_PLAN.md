@@ -75,9 +75,9 @@
 ## 5. 里程碑与任务清单
 
 ### N0 信号频率与策略丰满化（本次优先）
-- [ ] N0.1 动量确认放宽（`indicators/engine.py` 加 `macd_hist_streak`；`config.TRIGGER_MOMENTUM_BARS`；`signal/engine._trigger` 应用）★先做
-- [ ] N0.2 扳机灵敏度档位（设置页下拉：保守/标准/激进）
-- [ ] N0.3 ADX 门槛设置页暴露说明（`ADX_TREND_TH` 已可调）
+- [x] N0.1 动量确认放宽（`indicators/engine.py` 加 `macd_hist_streak`；`config.TRIGGER_MOMENTUM_BARS`；`signal/engine._trigger` 应用）★
+- [x] N0.2 扳机灵敏度档位（最小版：`TRIGGER_MOMENTUM_BARS` 已暴露设置页，1/3/5 可调；下拉档位增强待办）
+- [x] N0.3 ADX 门槛调低（`ADX_TREND_TH` 25→20；方向门拦截 123→114，主因是三条件一致非 ADX）
 - [ ] N0.4 波段入场（1h/4h 信号路径 + 信号卡区分短线/波段）
 - [ ] N0.5 量能正向加分 + 波动率目标仓位
 - [ ] N0.6 观察级信号（雷达预览）
