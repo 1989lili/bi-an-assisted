@@ -48,6 +48,15 @@ VOL_RATIO_HOT = 1.5                # 放量阈值
 VOL_RATIO_LOW = 0.7                # 缩量阈值
 OI_GROWTH_VETO = 0.01              # OI 变化率 <+1% 视为无增长
 
+# ---------- 量能正向加分（N0.5，量价配合进打分） ----------
+VOL_SCORE_STRONG = 8               # 放量+OI 增长：强确认（真突破）
+VOL_SCORE_MILD = 4                 # 仅放量或仅 OI 增 / 缩量回踩蓄势（A 级场景）
+
+# ---------- 波动率目标仓位（N0.5，vol targeting） ----------
+VOL_TARGET_ATR_PCT = 0.008         # 目标单根波动（ATR/价格），实际波动高于此则降仓
+VOL_FACTOR_MIN = 0.5               # 波动率仓位系数下限（最多降一半）
+VOL_FACTOR_MAX = 1.0               # 上限（不放大仓位）
+
 # ---------- 资金费率（动态两档） ----------
 FUNDING_NORMAL_MAX = 0.0003        # 正常档上限 0.03%
 FUNDING_STABLE_MAX = 0.001         # 稳定高位档上限 0.1%

@@ -142,7 +142,8 @@ class SignalEngine:
 
         # ---------- 打分 ----------
         confidence = score_signal(
-            market_env, s4h, s1h, s15m, trigger_level, funding_tier, risk["liq_dist_atr"]
+            market_env, s4h, s1h, s15m, trigger_level, funding_tier, risk["liq_dist_atr"],
+            volume_ratio=s15m.get("volume_ratio"), oi_change=oi_change,
         )
         if confidence < 50:
             self.rejections[symbol] = f"置信度不足（{confidence} 分）"
@@ -366,9 +367,24 @@ class SignalEngine:
             "target": round(risk["target"], 8),
             "risk_reward": risk["risk_reward"],
             "stop_dist": round(risk["stop_dist"], 8),
-            "position_factor": funding_tier.get("position_factor", 1.0),
+            "position_factor": round(
+                funding_tier.get("position_factor", 1.0) * self._vol_factor(s15m["atr"], s15m["close"]), 3
+            ),
             "limit_ttl_bars": config.EXEC_LIMIT_TTL_BARS,
         }
+
+    def _vol_factor(self, atr: float, price: float) -> float:
+        """波动率目标仓位系数（N0.5）：实际波动高于目标 → 降仓；低于目标不放大仓位。
+
+        factor = 目标 ATR% / 实际 ATR%，截断到 [VOL_FACTOR_MIN, VOL_FACTOR_MAX]。
+        """
+        if atr <= 0 or price <= 0:
+            return 1.0
+        vol_pct = atr / price
+        if vol_pct <= 0:
+            return 1.0
+        factor = config.VOL_TARGET_ATR_PCT / vol_pct
+        return max(config.VOL_FACTOR_MIN, min(config.VOL_FACTOR_MAX, factor))
 
     # ==================== 理由文本 ====================
 

@@ -15,6 +15,8 @@ def score_signal(
     trigger_level: str,
     funding_tier: dict,
     liq_dist_atr: float | None,
+    volume_ratio: float | None = None,
+    oi_change: float | None = None,
 ) -> int:
     """返回 0-100 置信度。≥70 强信号 / 50-69 弱信号 / <50 不输出。"""
     score = 0
@@ -63,5 +65,15 @@ def score_signal(
         score += 6
     else:
         score += 0
+
+    # ---------- 量能正向加分（N0.5，量价配合） ----------
+    if volume_ratio is not None:
+        oi_ok = (oi_change or 0.0) >= config.OI_GROWTH_VETO
+        if volume_ratio >= config.VOL_RATIO_HOT and oi_ok:
+            score += config.VOL_SCORE_STRONG      # 放量 + OI 增：真突破
+        elif volume_ratio >= config.VOL_RATIO_HOT or oi_ok:
+            score += config.VOL_SCORE_MILD        # 单边确认
+        elif volume_ratio <= config.VOL_RATIO_LOW:
+            score += config.VOL_SCORE_MILD        # 缩量回踩蓄势（A 级场景）
 
     return min(score, 100)
