@@ -196,8 +196,12 @@ def remove_macro_event(event_id: int) -> dict:
 
 @router.get("/settings")
 def get_settings() -> dict:
-    """返回全部配置参数（config 模块大写常量）。"""
-    return {k: v for k, v in vars(config).items() if k.isupper() and not k.startswith("_")}
+    """返回全部配置参数（config 模块大写常量）。敏感项（API Key/Secret）不外泄。"""
+    _sensitive = {"BINANCE_API_KEY", "BINANCE_API_SECRET"}
+    return {
+        k: v for k, v in vars(config).items()
+        if k.isupper() and not k.startswith("_") and k not in _sensitive
+    }
 
 
 @router.put("/settings/{key}")

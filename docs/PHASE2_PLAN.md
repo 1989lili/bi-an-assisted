@@ -84,7 +84,7 @@
 - [x] N0.7 策略一 EMA 趋势跟踪（独立策略路径：4h EMA200 趋势 + 15m EMA20/50 入场，空头镜像；三层出场=吊灯3×ATR+EMA50破位+48根时间止损；SignalCard.strategy 标签；首轮 4 信号验证）
 
 ### N1 执行层（一键确认小额实盘）
-- [ ] N1.1 Binance 交易 API 接入（Key 配置 + 余额/持仓/可交易额度校验）
+- [x] N1.1 Binance 交易 API 接入（`executor/binance.py`，ccxt 封装；dry_run 纸面默认；Key 入 settings.json，Secret 待填；GET /settings 敏感过滤已验证）
 - [ ] N1.2 信号卡「确认执行」→ 真实下单（幂等防重、最小量/精度、市价70%+限价30%）
 - [ ] N1.3 持仓自动风控（止损三段式自动执行 + 加仓单 TTL + 单日亏损熔断 + 开仓上限）
 - [ ] N1.4 实盘复盘（真实盈亏统计）

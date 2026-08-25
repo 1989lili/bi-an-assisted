@@ -86,6 +86,14 @@ MIN_RISK_REWARD = 2.0              # 盈亏比 ≥2
 RISK_PER_TRADE = 0.02              # 单笔风险 = 总资金 2%
 LIQ_DIST_BASE = 1.5                # 清算距离 ≥ 波动率系数×ATR
 
+# ---------- N1 执行层（币安 U 本位交易，默认纸面模式） ----------
+BINANCE_API_KEY = ""               # 由 data/settings.json 覆盖（用户自行填写）
+BINANCE_API_SECRET = ""            # 敏感字段：GET /api/settings 不外泄
+BINANCE_DRY_RUN = True             # 纸面模式（默认开）；确认小额实盘后再置 False
+BINANCE_MAX_ORDER_USDT = 100       # 单笔下单金额上限（USDT，防误操作超仓）
+BINANCE_DAILY_OPEN_LIMIT = 5       # 每日最大开仓次数
+BINANCE_DAILY_LOSS_LIMIT = 0.05    # 单日亏损熔断（占总资金比例）
+
 # ---------- 执行 ----------
 EXEC_MARKET_PCT = 0.7              # 市价入场 70%
 EXEC_LIMIT_PCT = 0.3               # 限价加仓 30%
