@@ -247,6 +247,17 @@ def compute_tf_snapshot(df: pd.DataFrame) -> Optional[dict]:
     last, prev = close.iloc[-1], close.iloc[-2]
 
     dif, dea, hist = macd(close)
+    # MACD 柱当前符号的连续根数（扳机动量确认放宽用：翻色后 N 根内仍视为有效）
+    _hist_arr = hist.to_numpy()
+    _streak = 0
+    if len(_hist_arr):
+        _sign = 1 if _hist_arr[-1] > 0 else (-1 if _hist_arr[-1] < 0 else 0)
+        if _sign != 0:
+            for _v in _hist_arr[::-1]:
+                _s = 1 if _v > 0 else (-1 if _v < 0 else 0)
+                if _s != _sign:
+                    break
+                _streak += 1
     rsi_s = rsi(close)
     atr_s = atr(df)
     _, _, _, bw = bollinger(df)
@@ -270,6 +281,7 @@ def compute_tf_snapshot(df: pd.DataFrame) -> Optional[dict]:
         "macd_dea": float(dea.iloc[-1]),
         "macd_hist": float(hist.iloc[-1]),
         "macd_hist_prev": float(hist.iloc[-2]),
+        "macd_hist_streak": _streak,
         "macd_above_zero": bool(dif.iloc[-1] > 0),
         "macd_golden": bool(dif.iloc[-1] > dea.iloc[-1]),
         "rsi": float(rsi_s.iloc[-1]),

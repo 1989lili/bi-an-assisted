@@ -38,6 +38,9 @@ VOL_MA_PERIODS = (7, 21)           # 均量线
 ADX_PERIOD = 14
 ADX_TREND_TH = 25                  # ADX>25 才开方向门
 SWING_WINDOW = 5                   # 价格结构枢轴窗口（HH/HL 识别）
+# 扳机动量确认放宽（N0.1）：5m MACD 柱同号连续根数 ≤ 该值视为有效
+# 1 = 仅"刚翻色"（原逻辑，最严）；3 = 翻色后 3 根内延续（默认）；5 = 激进
+TRIGGER_MOMENTUM_BARS = 3
 
 # ---------- 量能否决（一票否决） ----------
 VOL_RATIO_VETO = 1.2               # 量比 <1.2 且 OI 无增长 → 否决

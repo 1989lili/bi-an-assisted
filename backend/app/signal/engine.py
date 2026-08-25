@@ -193,11 +193,12 @@ class SignalEngine:
 
     def _trigger(self, s15m: dict, s5m: dict, direction: str) -> Optional[str]:
         """15m 主导 + 5m MACD 柱同向确认。A 回踩 / B 突破 / C 仅 RSI 穿越。"""
-        # 5m 确认：MACD 柱状线同向翻色
+        # 5m 确认：MACD 柱同向，且同号连续根数 ≤ TRIGGER_MOMENTUM_BARS（N0.1 放宽：翻色后数根内仍有效）
+        m5_streak = s5m.get("macd_hist_streak", 1)
         if direction == "long":
-            m5_ok = s5m["macd_hist"] > 0 and s5m["macd_hist_prev"] <= 0
+            m5_ok = s5m["macd_hist"] > 0 and m5_streak <= config.TRIGGER_MOMENTUM_BARS
         else:
-            m5_ok = s5m["macd_hist"] < 0 and s5m["macd_hist_prev"] >= 0
+            m5_ok = s5m["macd_hist"] < 0 and m5_streak <= config.TRIGGER_MOMENTUM_BARS
         if not m5_ok:
             return None
 
