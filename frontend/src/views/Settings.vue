@@ -35,6 +35,17 @@
       </van-cell-group>
     </div>
 
+    <!-- 访问令牌（H6 鉴权） -->
+    <div class="section">
+      <div class="sec-head"><span>访问令牌</span></div>
+      <van-cell-group inset>
+        <van-field v-model="tokenInput" label="Token" placeholder="与后端 APP_AUTH_TOKEN 一致；留空=未启用鉴权" />
+      </van-cell-group>
+      <div class="form-actions">
+        <van-button size="small" type="primary" plain @click="saveToken">保存</van-button>
+      </div>
+    </div>
+
     <!-- 关于 -->
     <div class="section about">
       <div>币安 U 本位合约辅助决策工具 v0.3.0</div>
@@ -84,6 +95,15 @@ const macroForm = reactive({ title: "", time: "" });
 const showParam = ref(false);
 const editingKey = ref("");
 const editingValue = ref("");
+
+// 访问令牌（H6）：存 localStorage，http.js 请求自动带 Authorization
+const tokenInput = ref(localStorage.getItem("app_token") || "");
+function saveToken() {
+  const v = tokenInput.value.trim();
+  if (v) localStorage.setItem("app_token", v);
+  else localStorage.removeItem("app_token");
+  showToast(v ? "已保存令牌" : "已清除令牌");
+}
 
 // 设置页只展示可调的关键参数（排除路径/内部项）
 const EDITABLE_KEYS = [

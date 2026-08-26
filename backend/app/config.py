@@ -98,6 +98,9 @@ BINANCE_MAX_LEVERAGE = 3           # 交易杠杆上限（≤3 倍，风控）
 BINANCE_DAILY_OPEN_LIMIT = 5       # 每日最大开仓次数
 BINANCE_DAILY_LOSS_LIMIT = 0.05    # 单日亏损熔断（占总资金比例）
 
+# ---------- 访问鉴权（H6） ----------
+APP_AUTH_TOKEN = ""                # 访问令牌（空=不启用鉴权；设置后所有 /api 需 Authorization: Bearer <token>）
+
 # ---------- 执行 ----------
 EXEC_MARKET_PCT = 0.7              # 市价入场 70%
 EXEC_LIMIT_PCT = 0.3               # 限价加仓 30%

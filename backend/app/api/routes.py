@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from .. import config
@@ -17,7 +17,39 @@ from ..notify.ws import manager
 from ..position.manager import initial_stop, position_snapshot
 from ..store import db
 
-router = APIRouter(prefix="/api")
+
+def _require_auth(request: Request) -> None:
+    """H6 鉴权：APP_AUTH_TOKEN 非空时，所有 /api 请求需携带 Authorization: Bearer <token>。"""
+    token = getattr(config, "APP_AUTH_TOKEN", "") or ""
+    if not token:
+        return
+    if request.headers.get("Authorization", "") != f"Bearer {token}":
+        raise HTTPException(status_code=401, detail="未授权访问")
+
+
+# H6 白名单：允许运行时修改的策略参数（禁止 BINANCE_*/路径/鉴权等敏感项）
+_SETTING_ALLOWLIST = frozenset({
+    "ADX_TREND_TH", "TRIGGER_MOMENTUM_BARS",
+    "VOL_RATIO_VETO", "VOL_RATIO_HOT", "VOL_RATIO_LOW", "OI_GROWTH_VETO",
+    "VOL_SCORE_STRONG", "VOL_SCORE_MILD",
+    "VOL_TARGET_ATR_PCT", "VOL_FACTOR_MIN", "VOL_FACTOR_MAX",
+    "FUNDING_NORMAL_MAX", "FUNDING_STABLE_MAX", "FUNDING_SURGE_TIMES",
+    "FUNDING_STABLE_FLUCT", "FUNDING_POSITION_FACTOR",
+    "BW_NARROW_FACTOR", "BW_WIDE_FACTOR",
+    "ATR_COEF_NARROW", "ATR_COEF_NORMAL", "ATR_COEF_WIDE",
+    "MIN_RISK_REWARD", "RISK_PER_TRADE",
+    "EXEC_MARKET_PCT", "EXEC_LIMIT_PCT", "EXEC_LIMIT_TTL_BARS",
+    "SIGNAL_TTL_BARS", "SIGNAL_COOLDOWN_MINUTES",
+    "SL_INIT_COEF", "BE_PROFIT_ATR", "TRAIL_PROFIT_ATR",
+    "MACRO_SILENCE_MINUTES",
+    "EMA_TREND_VOL_MULT", "EMA_TREND_RETRACE_LOOKBACK", "EMA_TREND_ENTRY_NEAR_ATR",
+    "EMA_TREND_RSI_MIN", "EMA_TREND_RSI_MAX", "EMA_TREND_EXIT_ATR",
+    "EMA_TREND_TP_RR", "EMA_TREND_TIME_BARS",
+    "CANDIDATE_MIN_QUOTE_VOLUME", "CANDIDATE_TOP_VOLUME",
+    "CANDIDATE_TOP_CHANGE", "CANDIDATE_TOP_GAIN",
+})
+
+router = APIRouter(prefix="/api", dependencies=[Depends(_require_auth)])
 
 
 # ==================== 数据模型 ====================
@@ -310,6 +342,8 @@ def update_setting(key: str, payload: SettingValue) -> dict:
     """运行时覆盖配置（仅影响内存，重启恢复默认）。key 必须是大写配置名。"""
     if not key.isupper() or not hasattr(config, key):
         raise HTTPException(status_code=400, detail="无效配置项")
+    if key not in _SETTING_ALLOWLIST:
+        raise HTTPException(status_code=400, detail="该配置项不允许运行时修改")
     setattr(config, key, payload.value)
     db.set_setting(key, str(payload.value))
     config.save_setting(key, payload.value)  # 持久化到 data/settings.json（重启仍生效）

@@ -2,8 +2,11 @@
 const BASE = "/api";
 
 async function request(path, options = {}) {
+  const token = localStorage.getItem("app_token") || "";
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const resp = await fetch(BASE + path, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
   if (!resp.ok) {
