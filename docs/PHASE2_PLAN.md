@@ -114,8 +114,8 @@
 
 ### 高危
 - [ ] H6 加鉴权 + `PUT /api/settings` 白名单（防改 dry_run/限额/下单）
-- [ ] H4 手动平仓真正发币安单 + 自动平仓校验订单结果
-- [ ] H5 平仓单加 `reduceOnly` 防反向开仓
+- [x] H4 手动平仓真正发币安单 + 自动平仓校验订单结果（`20499ba`）
+- [x] H5 平仓单加 `reduceOnly` 防反向开仓（`20499ba`）
 - [ ] H7 实盘前给持仓挂交易所侧止损单
 - [x] H3 幂等（进程锁 `e3b4b7a` + 下单前原子占位 executed 列/失败回滚 `15792db`）
 - [x] H2 三段式（键名统一 `e3b4b7a` + move_stop 持久化止损价/阶段 `15792db`）
@@ -126,6 +126,6 @@
 - [x] M4 前端处理 `position:update`（Positions.vue 已订阅）
 - [ ] M1 策略一时间止损对持仓生效（position_monitor 传 elapsed_bars）
 - [ ] M2 下单应用 position_factor/market_pct，移除死参数
-- [ ] M3 手动平仓写入 realized_pnl（供熔断统计）
+- [x] M3 手动平仓写入 realized_pnl（`20499ba`）
 - [ ] M5 下单金额按币种精度截断 + 最小下单量校验
 - [x] M7 set_leverage 失败即拒绝下单（`06191ea`）
