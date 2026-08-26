@@ -147,16 +147,19 @@ class DeepScanner:
         last_close = float(entry_df["close"].iloc[-1])
         atr_v = res["atr"]
         # 初始吊灯止损（三层出场①）：入场价 ∓ 3×ATR，作为卡面展示的参考止损
-        stop_loss = (last_close - config.EMA_TREND_EXIT_ATR * atr_v) if res["direction"] == "long" \
-            else (last_close + config.EMA_TREND_EXIT_ATR * atr_v)
+        stop_dist = config.EMA_TREND_EXIT_ATR * atr_v
+        stop_loss = (last_close - stop_dist) if res["direction"] == "long" else (last_close + stop_dist)
+        # 第一目标止盈价：入场价 ± RR×止损距离（到目标可先锁定部分利润，趋势跟踪继续）
+        target = (last_close + config.EMA_TREND_TP_RR * stop_dist) if res["direction"] == "long" \
+            else (last_close - config.EMA_TREND_TP_RR * stop_dist)
         exec_plan = {
             "market_price": round(last_close, 8),
             "market_pct": int(config.EXEC_MARKET_PCT * 100),
             "limit_pct": int(config.EXEC_LIMIT_PCT * 100),
             "limit_price": round((float(entry_df["high"].iloc[-2]) + float(entry_df["low"].iloc[-2])) / 2, 8),
             "stop_loss": round(stop_loss, 8),
-            "target": None,          # 趋势跟踪：无固定止盈点位
-            "risk_reward": None,     # 无固定盈亏比
+            "target": round(target, 8),
+            "risk_reward": config.EMA_TREND_TP_RR,
             "atr": round(atr_v, 8),
             "highest_close": last_close,
             "lowest_close": last_close,

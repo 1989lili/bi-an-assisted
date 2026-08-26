@@ -61,7 +61,7 @@
           <i>止损</i>{{ fmtPrice(card.execution?.stop_loss) }} {{ quote }}
         </span>
         <span class="exec-cell" v-if="card.execution?.target || card.strategy === 'ema_trend'">
-          <i>目标</i>{{ card.execution?.target ? fmtPrice(card.execution.target) : '随趋势(EMA50)' }} {{ quote }}
+          <i>第一目标</i>{{ card.execution?.target ? fmtPrice(card.execution.target) : '随趋势(EMA50)' }} {{ quote }}
         </span>
       </div>
     </div>

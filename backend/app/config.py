@@ -51,6 +51,7 @@ EMA_TREND_ENTRY_NEAR_ATR = 2.0     # 入场价与 EMA20 距离 ≤ 2×ATR（不�
 EMA_TREND_RSI_MIN, EMA_TREND_RSI_MAX = 32, 68  # RSI 顺势区间（多头 50~68，空头 32~50，不追超买超卖）
 # 策略一出场（三层，monitor 判定，收盘价为准）
 EMA_TREND_EXIT_ATR = 3.0           # ① 吊灯止损：持仓期最高/最低收盘价 ∓ N×ATR
+EMA_TREND_TP_RR = 2.5              # 第一目标止盈盈亏比：止盈价 = 入场价 ± RR×止损距离
 EMA_TREND_TIME_BARS = 48           # ③ 时间止损：入场后 N 根入场周期 K 线未创新高/新低 → 离场
 
 # ---------- 量能否决（一票否决） ----------
