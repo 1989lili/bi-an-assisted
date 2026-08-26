@@ -19,12 +19,18 @@ from ..store import db
 
 
 def _require_auth(request: Request) -> None:
-    """H6 鉴权：APP_AUTH_TOKEN 非空时，所有 /api 请求需携带 Authorization: Bearer <token>。"""
+    """H6 鉴权：APP_AUTH_TOKEN 非空时，所有 /api 请求需 Authorization: Bearer <token>。
+
+    WebSocket 场景：浏览器 WS 无法自定义 Authorization 头，允许 query 参数 ?token=xxx。
+    """
     token = getattr(config, "APP_AUTH_TOKEN", "") or ""
     if not token:
         return
-    if request.headers.get("Authorization", "") != f"Bearer {token}":
-        raise HTTPException(status_code=401, detail="未授权访问")
+    if request.headers.get("Authorization", "") == f"Bearer {token}":
+        return
+    if request.query_params.get("token") == token:
+        return
+    raise HTTPException(status_code=401, detail="未授权访问")
 
 
 # H6 白名单：允许运行时修改的策略参数（禁止 BINANCE_*/路径/鉴权等敏感项）

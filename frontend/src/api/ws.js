@@ -28,7 +28,9 @@ function notify(event, data) {
 
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/api/ws`);
+  const token = localStorage.getItem("app_token") || "";
+  const query = token ? `?token=${encodeURIComponent(token)}` : "";
+  ws = new WebSocket(`${proto}://${location.host}/api/ws${query}`);
 
   ws.onopen = () => {
     wsState.connected = true;
