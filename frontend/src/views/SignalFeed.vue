@@ -60,9 +60,13 @@
       </div>
     </div>
 
-    <!-- 信号列表：只显示当前有效信号（过期/止损者不显示） -->
-    <van-empty v-if="!loading && activeSignals.length === 0" description="暂无有效信号（引擎持续监控中，触发后实时推送）" />
+    <!-- 信号列表：有效置顶，已离场/过期沉底分组展示 -->
+    <van-empty v-if="!loading && signals.length === 0" description="暂无信号（引擎持续监控中，触发后实时推送）" />
     <div v-for="card in activeSignals" :key="card.id" class="signal-item" :class="{ fresh: card.id === newestId }">
+      <SignalCard :card="card" />
+    </div>
+    <div v-if="deadSignals.length" class="sig-sep">历史信号（{{ deadSignals.length }}，已离场/过期）</div>
+    <div v-for="card in deadSignals" :key="card.id" class="signal-item">
       <SignalCard :card="card" />
     </div>
   </div>
