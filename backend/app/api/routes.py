@@ -164,11 +164,14 @@ def execute_signal(signal_id: str, request: Request) -> dict:
         budget = min(free, config.BINANCE_MAX_ORDER_USDT) * pf
         # 70/30 拆分：市价 70% + 限价 30%（exec_plan.limit_price = 前阳 50% 回撤位）
         market_pct = int(exec_plan.get("market_pct") or config.EXEC_MARKET_PCT * 100) / 100
-        market_amount = round(budget * market_pct / price, 6)
-        limit_amount = round(budget * (1 - market_pct) / price, 6)
+        # M5：按币种数量精度截断 + 最小下单量校验（高币价币种精度低，直接 round 会被币安拒单）
+        market_amount = executor.amount_to_precision(symbol, round(budget * market_pct / price, 8))
+        limit_amount = executor.amount_to_precision(symbol, round(budget * (1 - market_pct) / price, 8))
         amount = market_amount + limit_amount  # 总计划仓位（含限价腿）
-        if market_amount <= 0:
-            raise HTTPException(status_code=400, detail="可用余额不足以开仓")
+        min_amt = executor.min_amount(symbol)
+        if market_amount <= 0 or (min_amt > 0 and market_amount < min_amt):
+            raise HTTPException(status_code=400,
+                                detail=f"市价腿数量 {market_amount} 低于币种最小下单量 {min_amt}")
 
         # H3 原子占位：下单前先标记 executed（防并发/崩溃窗口"有单无记录"重复下单）
         if not db.mark_signal_executed(signal_id):

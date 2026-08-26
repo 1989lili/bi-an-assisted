@@ -175,3 +175,22 @@ class BinanceExecutor:
         except Exception as exc:  # noqa: BLE001
             logger.warning("撤单失败 %s %s: %s", symbol, order_id, exc)
             return {"ok": False, "error": str(exc)}
+
+    # ---------- 数量精度 / 最小下单量（M5） ----------
+
+    def amount_to_precision(self, symbol: str, amount: float) -> float:
+        """按币种数量精度截断（ccxt amount_to_precision，LOT_SIZE step 对齐）。失败回退 6 位。"""
+        try:
+            ex = self._client()
+            return float(ex.amount_to_precision(symbol, amount))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("数量精度截断失败 %s: %s", symbol, exc)
+            return round(amount, 6)
+
+    def min_amount(self, symbol: str) -> float:
+        """币种最小下单量（limits.amount.min）。"""
+        try:
+            market = self._client().market(symbol)
+            return float(market.get("limits", {}).get("amount", {}).get("min") or 0)
+        except Exception:  # noqa: BLE001
+            return 0.0
