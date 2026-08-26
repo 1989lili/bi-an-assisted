@@ -120,6 +120,56 @@ def get_signal(signal_id: str) -> dict:
 _execute_lock = threading.Lock()  # 进程内互斥：防并发重复执行同一信号
 
 
+@router.get("/signal-stats")
+def signal_stats() -> dict:
+    """信号结局统计（评估模型准确性）：按策略统计止损/止盈(到目标)/趋势/时间离场 + 兑现率。"""
+    sigs = db.get_signals(limit=500)
+    by_strategy: dict[str, dict] = {}
+    for s in sigs:
+        strat = s.get("strategy") or "short"
+        st = by_strategy.setdefault(strat, {
+            "total": 0, "settled": 0, "pending": 0, "unknown": 0,
+            "stop": 0, "trend": 0, "time": 0, "expired": 0, "target_hit": 0,
+            "conf_sum": 0.0, "conf_count": 0,
+        })
+        st["total"] += 1
+        if s.get("status") in ("stopped_out", "expired"):
+            r = s.get("result")
+            if not r:  # 历史信号无结局标注（结果跟踪上线前）
+                st["unknown"] += 1
+                continue
+            st["settled"] += 1
+            et = r.get("exit_type")
+            if et == "stop":
+                st["stop"] += 1
+            elif et == "trend":
+                st["trend"] += 1
+            elif et == "time":
+                st["time"] += 1
+            elif et == "expired":
+                st["expired"] += 1
+            if r.get("hit_target"):
+                st["target_hit"] += 1
+            st["conf_sum"] += float(s.get("confidence") or 0)
+            st["conf_count"] += 1
+        else:
+            st["pending"] += 1
+
+    out = {}
+    for strat, st in by_strategy.items():
+        settled = st["settled"]
+        out[strat] = {
+            "total": st["total"], "settled": st["settled"], "pending": st["pending"], "unknown": st["unknown"],
+            "stop": st["stop"], "trend": st["trend"], "time": st["time"],
+            "expired": st["expired"], "target_hit": st["target_hit"],
+            "stop_rate": round(st["stop"] / settled, 3) if settled else None,
+            "non_stop_rate": round((settled - st["stop"]) / settled, 3) if settled else None,
+            "target_hit_rate": round(st["target_hit"] / settled, 3) if settled else None,
+            "avg_conf_settled": round(st["conf_sum"] / st["conf_count"], 1) if st["conf_count"] else None,
+        }
+    return {"strategies": out}
+
+
 @router.post("/signals/{signal_id}/execute")
 def execute_signal(signal_id: str, request: Request) -> dict:
     """一键执行信号：按信号卡执行计划下单（dry_run 下仅模拟）并创建本地持仓。

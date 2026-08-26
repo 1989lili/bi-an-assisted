@@ -28,6 +28,18 @@ def _entry_bar_ms() -> int:
     return minutes * 60 * 1000
 
 
+def _exit_type_from_reason(reason: str) -> str:
+    """离场原因 → 结局类型：stop(止损)/trend(趋势失效)/time(时间止损)/expired(过期)。"""
+    r = reason or ""
+    if "时间" in r:
+        return "time"
+    if "吊灯" in r or "止损" in r:
+        return "stop"
+    if "EMA50" in r or "趋势" in r:
+        return "trend"
+    return "trend"
+
+
 class SignalMonitor:
     """活跃信号跟踪器：高频更新实时价，判定信号失效。"""
 
@@ -76,6 +88,12 @@ class SignalMonitor:
             logger.warning("信号监控拉取失败 %s: %s", sig["symbol"], exc)
             return None
 
+        # 记录是否曾到达第一目标（兑现率统计用）
+        target = sig.get("execution", {}).get("target")
+        if target:
+            if (sig["direction"] == "long" and live >= target) or (sig["direction"] == "short" and live <= target):
+                sig["hit_target"] = True
+
         # ③ 触及止损 → stopped_out（用收盘价判定，规避插针误判）
         stop = sig.get("execution", {}).get("stop_loss")
         if stop:
@@ -113,6 +131,13 @@ class SignalMonitor:
         exec_["highest_close"] = max(prev_high, last_close)
         exec_["lowest_close"] = min(prev_low, last_close)
 
+        # 记录是否曾到达第一目标（兑现率统计用）
+        target = exec_.get("target")
+        if target:
+            if (sig["direction"] == "long" and exec_["highest_close"] >= target) or \
+               (sig["direction"] == "short" and exec_["lowest_close"] <= target):
+                sig["hit_target"] = True
+
         bar_ms = _entry_bar_ms()
         elapsed = int((now_ms - sig.get("created_at", now_ms)) / bar_ms) if bar_ms else None
 
@@ -125,10 +150,16 @@ class SignalMonitor:
         return self._save(sig, status=sig.get("status") or "confirmed", live=last_close)
 
     def _save(self, sig: dict, status: str, live: Optional[float] = None) -> dict:
-        """更新状态/实时价并落库（INSERT OR REPLACE 全量覆盖）。"""
+        """更新状态/实时价并落库。离场时记录结局（exit_type/hit_target，供兑现率统计）。"""
         sig["status"] = status
         if live is not None:
             sig["live_price"] = live
             sig["live_updated_at"] = int(time.time() * 1000)
+        if status in ("stopped_out", "expired") and "result" not in sig:
+            sig["result"] = {
+                "exit_type": "expired" if status == "expired" else _exit_type_from_reason(sig.get("reason", "")),
+                "exit_price": live if live is not None else sig.get("live_price"),
+                "hit_target": bool(sig.get("hit_target")),
+            }
         db.save_signal(sig)
         return sig

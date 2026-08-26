@@ -31,6 +31,24 @@
       </div>
     </div>
 
+    <!-- 结局统计（模型准确性：止损 vs 止盈/趋势离场） -->
+    <div class="stats-block" v-if="statsData && Object.keys(statsData).length">
+      <div class="stat-strat" v-for="(v, strat) in statsData" :key="strat">
+        <div class="ss-title">{{ strat === "ema_trend" ? "EMA趋势" : "短线" }}</div>
+        <div class="ss-line">
+          已结算 {{ v.settled }} ｜ 止损 {{ v.stop }} ｜ 到目标 {{ v.target_hit }}
+        </div>
+        <div class="ss-line">
+          趋势离场 {{ v.trend }} ｜ 时间 {{ v.time }} ｜ 过期 {{ v.expired }}
+        </div>
+        <div class="ss-line ok">
+          非止损率 {{ v.non_stop_rate != null ? (v.non_stop_rate * 100).toFixed(0) + "%" : "-" }}
+          ｜ 止损率 {{ v.stop_rate != null ? (v.stop_rate * 100).toFixed(0) + "%" : "-" }}
+          ｜ 均分 {{ v.avg_conf_settled ?? "-" }}
+        </div>
+      </div>
+    </div>
+
     <!-- 信号历史列表（轻量） -->
     <van-cell-group inset v-for="s in filtered" :key="s.id" class="row">
       <van-cell
@@ -54,6 +72,7 @@ import { fmtTime, shortSymbol } from "../utils/format";
 const signals = ref([]);
 const loading = ref(true);
 const tab = ref(0);
+const statsData = ref(null);
 
 const filtered = computed(() => {
   if (tab.value === 0) return signals.value;
@@ -82,6 +101,12 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+  try {
+    const r = await api.signalStats();
+    statsData.value = r.strategies;
+  } catch (e) {
+    console.error("加载结局统计失败", e);
+  }
 });
 </script>
 
@@ -89,6 +114,13 @@ onMounted(async () => {
 .toolbar { margin-bottom: 10px; }
 .title { font-size: 18px; font-weight: 700; display: block; margin-bottom: 8px; }
 .tabs { --van-tabs-bottom-bar-color: #34c759; }
+.stats-block { margin-bottom: 12px; }
+.stat-strat {
+  background: #1c1c1e; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+}
+.ss-title { font-size: 13px; font-weight: 700; color: #34c759; margin-bottom: 4px; }
+.ss-line { font-size: 12px; color: #8e8e93; line-height: 1.7; }
+.ss-line.ok { color: #34c759; font-weight: 600; }
 .stats {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px;
 }

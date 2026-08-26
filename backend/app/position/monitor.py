@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 from .. import config
 from ..indicators.engine import atr, ema
+from ..signal.monitor import _exit_type_from_reason
 from ..store import db
 
 logger = logging.getLogger(__name__)
@@ -137,4 +138,17 @@ class PositionMonitor:
                 sig["closed_price"] = price
                 sig["realized_pnl"] = round(pnl, 8)
                 sig["reason"] = f"{sig.get('reason', '')}｜离场：{outcome.get('reason')}"
+                # 结果跟踪：结局类型 + 是否曾到第一目标（兑现率统计）
+                exec_ = sig.setdefault("execution", {})
+                target = exec_.get("target")
+                hit_target = bool(sig.get("hit_target"))
+                if target:
+                    if (pos["direction"] == "long" and float(exec_.get("highest_close") or price) >= target) or \
+                       (pos["direction"] == "short" and float(exec_.get("lowest_close") or price) <= target):
+                        hit_target = True
+                sig["result"] = {
+                    "exit_type": _exit_type_from_reason(outcome.get("reason", "")),
+                    "exit_price": price,
+                    "hit_target": hit_target,
+                }
                 db.save_signal(sig)
