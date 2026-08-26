@@ -158,9 +158,16 @@ def execute_signal(signal_id: str, request: Request) -> dict:
         if total > 0 and pnl_today < 0 and abs(pnl_today) / total >= config.BINANCE_DAILY_LOSS_LIMIT:
             raise HTTPException(status_code=429, detail="当日亏损已达熔断线，暂停新开仓")
         free = float(bal.get("free") or 0)
-        budget = min(free, config.BINANCE_MAX_ORDER_USDT)  # 单笔预算上限
-        amount = round(budget / price, 6)                  # 合约数量（第一版：预算/价格）
-        if amount <= 0:
+        # M2：应用仓位系数 position_factor（费率×波动率，波动大自动降仓），限制 0.1~1.0
+        pf = float(exec_plan.get("position_factor") or 1.0)
+        pf = max(0.1, min(1.0, pf))
+        budget = min(free, config.BINANCE_MAX_ORDER_USDT) * pf
+        # 70/30 拆分：市价 70% + 限价 30%（exec_plan.limit_price = 前阳 50% 回撤位）
+        market_pct = int(exec_plan.get("market_pct") or config.EXEC_MARKET_PCT * 100) / 100
+        market_amount = round(budget * market_pct / price, 6)
+        limit_amount = round(budget * (1 - market_pct) / price, 6)
+        amount = market_amount + limit_amount  # 总计划仓位（含限价腿）
+        if market_amount <= 0:
             raise HTTPException(status_code=400, detail="可用余额不足以开仓")
 
         # H3 原子占位：下单前先标记 executed（防并发/崩溃窗口"有单无记录"重复下单）
@@ -168,10 +175,17 @@ def execute_signal(signal_id: str, request: Request) -> dict:
             raise HTTPException(status_code=409, detail="信号已被占用或执行")
 
         side = "buy" if direction == "long" else "sell"
-        market = executor.create_order(symbol, side, amount, order_type="market")
+        market = executor.create_order(symbol, side, market_amount, order_type="market")
         if not market.get("ok"):
             db.unmark_signal_executed(signal_id)  # 下单失败回滚占位，允许重试
             raise HTTPException(status_code=502, detail=f"下单失败: {market.get('error')}")
+
+        # 限价腿（30%）：挂限价单（exec_plan.limit_price）；失败不阻塞市价腿
+        limit_order = None
+        limit_price = exec_plan.get("limit_price")
+        if limit_amount > 0 and limit_price:
+            limit_order = executor.create_order(symbol, side, limit_amount,
+                                                order_type="limit", price=float(limit_price))
 
         pid = db.create_position(symbol, direction, price, amount,
                                  stop_price=exec_plan.get("stop_loss") or None, stop_stage=1,
@@ -193,7 +207,8 @@ def execute_signal(signal_id: str, request: Request) -> dict:
             "ok": True, "dry_run": market.get("dry_run"), "signal_id": signal_id,
             "position_id": pid, "side": side, "amount": amount,
             "order_id": market.get("id"), "price": price,
-            "budget_usdt": budget, "mode": executor.mode_label,
+            "limit_order_id": limit_order.get("id") if limit_order else None,
+            "budget_usdt": budget, "position_factor": pf, "mode": executor.mode_label,
         }
 
 
