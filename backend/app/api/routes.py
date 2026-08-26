@@ -71,8 +71,9 @@ class SettingValue(BaseModel):
 
 
 class ExecuteRequest(BaseModel):
-    """一键执行请求：budget_usdt 可选（用户确认页调整后的预算；缺省 = 总余额×EXEC_DEFAULT_BUDGET_PCT）。"""
+    """一键执行请求：budget_usdt（确认页调整后预算）；leverage（确认页选的杠杆 1~5，默认3）。"""
     budget_usdt: Optional[float] = None
+    leverage: Optional[int] = None
 
 
 # ==================== 系统状态 ====================
@@ -241,6 +242,13 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
         # H3 原子占位：下单前先标记 executed（防并发/崩溃窗口"有单无记录"重复下单）
         if not db.mark_signal_executed(signal_id):
             raise HTTPException(status_code=409, detail="信号已被占用或执行")
+
+        # 杠杆（确认页可选 1~5，默认3；不允许超 BINANCE_MAX_LEVERAGE）
+        lev = max(1, min(int(payload.leverage or config.BINANCE_DEFAULT_LEVERAGE), config.BINANCE_MAX_LEVERAGE))
+        lev_res = executor.set_leverage(symbol, lev)
+        if not lev_res.get("ok"):
+            db.unmark_signal_executed(signal_id)
+            raise HTTPException(status_code=502, detail=lev_res.get("error"))
 
         side = "buy" if direction == "long" else "sell"
         market = executor.create_order(symbol, side, market_amount, order_type="market")

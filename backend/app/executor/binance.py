@@ -97,6 +97,19 @@ class BinanceExecutor:
 
     # ---------- 下单 ----------
 
+    def set_leverage(self, symbol: str, leverage: int) -> dict:
+        """设置币安杠杆（限制 1 ~ BINANCE_MAX_LEVERAGE，不允许超上限）。"""
+        lev = max(1, min(int(leverage), config.BINANCE_MAX_LEVERAGE))
+        if self.dry_run:
+            logger.info("[DRY-RUN] set_leverage %s %sx", symbol, lev)
+            return {"ok": True, "dry_run": True, "leverage": lev}
+        try:
+            self._client().set_leverage(lev, symbol)
+            return {"ok": True, "leverage": lev}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("设置杠杆失败 %s %sx: %s", symbol, lev, exc)
+            return {"ok": False, "error": f"设置杠杆失败: {exc}"}
+
     def create_order(self, symbol: str, side: str, amount: float,
                      order_type: str = "market", price: Optional[float] = None,
                      reduce_only: bool = False) -> dict:
@@ -119,12 +132,6 @@ class BinanceExecutor:
             }
         try:
             ex = self._client()
-            # 杠杆上限控制（≤ BINANCE_MAX_LEVERAGE，默认 3 倍；失败即拒绝下单，防实际杠杆超限）
-            try:
-                ex.set_leverage(config.BINANCE_MAX_LEVERAGE, symbol)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("设置杠杆失败 %s: %s", symbol, exc)
-                return {"ok": False, "error": f"设置杠杆失败: {exc}"}
             kwargs = {}
             if order_type == "limit" and price is not None:
                 kwargs["price"] = price

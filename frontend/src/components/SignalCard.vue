@@ -85,7 +85,10 @@
     <van-dialog v-model:show="showExecDialog" title="确认执行" show-cancel-button @confirm="confirmExecute">
       <div class="exec-dialog">
         <div class="ed-row"><span>标的</span><b>{{ shortSymbol(card.symbol) }} {{ card.direction === "long" ? "做多" : "做空" }}</b></div>
-        <div class="ed-row"><span>杠杆</span><b>3 倍</b></div>
+        <div class="ed-row">
+          <span>杠杆(倍)</span>
+          <input v-model="execLeverage" type="number" min="1" max="5" step="1" class="ed-input" />
+        </div>
         <div class="ed-row"><span>拆分</span><b>市价 70% + 限价 30%</b></div>
         <div class="ed-row"><span>止损</span><b>{{ fmtPrice(card.execution?.stop_loss) }}</b></div>
         <div class="ed-row"><span>第一目标</span><b>{{ targetDisplay ? fmtPrice(targetDisplay) : "-" }}</b></div>
@@ -195,6 +198,7 @@ const canExecute = computed(() =>
 const executing = ref(false);
 const showExecDialog = ref(false);
 const execBudget = ref(0);
+const execLeverage = ref(3); // 默认 3 倍，可选 1~5
 const totalBalance = ref(0);
 
 // 一键执行：先拉余额 → 弹出可调预算的确认框（默认 = 总余额 50%）
@@ -218,10 +222,11 @@ async function confirmExecute() {
     showToast("预算需大于 0");
     return;
   }
+  const lev = Math.min(5, Math.max(1, Number(execLeverage.value) || 3)); // 限制 1~5 倍
   showExecDialog.value = false;
   executing.value = true;
   try {
-    const r = await api.executeSignal(props.card.id, { budget_usdt: b });
+    const r = await api.executeSignal(props.card.id, { budget_usdt: b, leverage: lev });
     showToast(r.dry_run ? "纸面模拟下单成功" : `实盘下单成功（${r.side} ${r.amount}）`);
   } catch (e) {
     showToast(e.message);
