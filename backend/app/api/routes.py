@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -218,10 +219,36 @@ def patch_position(position_id: int, payload: PositionPatch) -> dict:
 
 
 @router.post("/positions/{position_id}/close")
-def close_position(position_id: int) -> dict:
-    if not db.close_position(position_id):
+def close_position(position_id: int, request: Request) -> dict:
+    """手动平仓：真正向币安发 reduceOnly 平仓单（H4/H5），成功后写回已实现盈亏（M3）。"""
+    pos = db.get_position(position_id)
+    if pos is None or pos.get("status") != "open":
         raise HTTPException(status_code=404, detail="持仓不存在或已平仓")
-    return {"ok": True}
+    executor = request.app.state.executor
+    if not executor.configured:
+        raise HTTPException(status_code=503, detail="未配置币安 API Key/Secret")
+
+    # 现价（平仓估算价，优先最新 15m 收盘）
+    price = float(pos.get("entry_price") or 0)
+    try:
+        df = request.app.state.fetcher.fetch_ohlcv(pos["symbol"], config.TIMEFRAMES["entry"], limit=2)
+        if df is not None and len(df):
+            price = float(df["close"].iloc[-1])
+    except Exception:  # noqa: BLE001 - 行情不可用时按入场价估算
+        pass
+
+    side = "sell" if pos["direction"] == "long" else "buy"
+    qty = float(pos.get("qty") or 0)
+    order = executor.create_order(pos["symbol"], side, qty, order_type="market", reduce_only=True)
+    if not order.get("ok"):
+        raise HTTPException(status_code=502, detail=f"平仓下单失败: {order.get('error')}")
+
+    entry = float(pos.get("entry_price") or 0)
+    pnl = (price - entry) * qty if pos["direction"] == "long" else (entry - price) * qty
+    db.update_position(position_id, status="closed", realized_pnl=round(pnl, 8),
+                       closed_at=datetime.now(timezone.utc).isoformat())
+    return {"ok": True, "dry_run": order.get("dry_run"), "price": price,
+            "realized_pnl": round(pnl, 8), "order_id": order.get("id")}
 
 
 @router.get("/positions/{position_id}/status")

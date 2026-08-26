@@ -98,9 +98,11 @@ class BinanceExecutor:
     # ---------- 下单 ----------
 
     def create_order(self, symbol: str, side: str, amount: float,
-                     order_type: str = "market", price: Optional[float] = None) -> dict:
+                     order_type: str = "market", price: Optional[float] = None,
+                     reduce_only: bool = False) -> dict:
         """创建订单。side: buy/sell；amount: 合约数量。
 
+        reduce_only=True 时下单带 reduceOnly（平仓单，防止无持仓时误开反向新仓，H5）。
         dry_run=True 时仅模拟记录并返回模拟订单。
         """
         if amount <= 0:
@@ -108,11 +110,12 @@ class BinanceExecutor:
         if not self.configured:
             return {"ok": False, "error": "未配置 BINANCE_API_KEY/SECRET"}
         if self.dry_run:
-            logger.info("[DRY-RUN] %s %s %s amount=%s price=%s", order_type, side, symbol, amount, price)
+            logger.info("[DRY-RUN] %s %s %s amount=%s price=%s reduce_only=%s",
+                        order_type, side, symbol, amount, price, reduce_only)
             return {
                 "ok": True, "dry_run": True, "id": f"dry_{int(time.time() * 1000)}",
                 "symbol": symbol, "side": side, "type": order_type,
-                "amount": amount, "price": price, "status": "closed",
+                "amount": amount, "price": price, "reduce_only": reduce_only, "status": "closed",
             }
         try:
             ex = self._client()
@@ -125,13 +128,15 @@ class BinanceExecutor:
             kwargs = {}
             if order_type == "limit" and price is not None:
                 kwargs["price"] = price
+            if reduce_only:
+                kwargs["params"] = {"reduceOnly": True}  # 平仓单：只减仓，防反向开仓
             order = ex.create_order(symbol, order_type, side, amount, **kwargs)
             return {
                 "ok": True, "dry_run": False,
                 "id": order.get("id"), "symbol": order.get("symbol"),
                 "side": order.get("side"), "type": order.get("type"),
                 "amount": order.get("amount"), "price": order.get("price"),
-                "status": order.get("status"),
+                "reduce_only": reduce_only, "status": order.get("status"),
             }
         except Exception as exc:  # noqa: BLE001
             logger.error("下单失败 %s %s %s: %s", symbol, side, amount, exc)

@@ -87,7 +87,12 @@ class PositionMonitor:
             logger.warning("未配置币安凭据，无法自动平仓 %s", pos.get("symbol"))
             return
         side = "sell" if pos["direction"] == "long" else "buy"
-        order = self.executor.create_order(pos["symbol"], side, float(pos.get("qty") or 0), order_type="market")
+        order = self.executor.create_order(pos["symbol"], side, float(pos.get("qty") or 0),
+                                           order_type="market", reduce_only=True)
+        if not order.get("ok"):
+            # H4：下单失败不回滚为 closed（保持 open，下轮重试）
+            logger.error("自动平仓下单失败 %s %s: %s", pos["symbol"], pos["direction"], order.get("error"))
+            return
         price = float(outcome.get("price") or pos.get("entry_price") or 0)
         entry = float(pos.get("entry_price") or 0)
         qty = float(pos.get("qty") or 0)
