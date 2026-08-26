@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS signals (
     confidence  INTEGER,
     card_json   TEXT NOT NULL,           -- 完整 SignalCard JSON（M2 使用）
     status      TEXT DEFAULT 'active',   -- active/expired/filled/cancelled
+    executed    INTEGER DEFAULT 0,       -- 1=已一键执行（幂等占位，H3）
     created_at  TEXT NOT NULL,
     expires_at  TEXT
 );
@@ -88,14 +89,17 @@ def init_db() -> None:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """旧库补列（CREATE TABLE IF NOT EXISTS 不会为已存在表加列）。"""
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()}
+    pos_cols = {r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()}
     for col, ddl in (
         ("strategy", "ALTER TABLE positions ADD COLUMN strategy TEXT DEFAULT 'short'"),
         ("signal_id", "ALTER TABLE positions ADD COLUMN signal_id TEXT"),
         ("realized_pnl", "ALTER TABLE positions ADD COLUMN realized_pnl REAL"),
     ):
-        if col not in cols:
+        if col not in pos_cols:
             conn.execute(ddl)
+    sig_cols = {r["name"] for r in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    if "executed" not in sig_cols:
+        conn.execute("ALTER TABLE signals ADD COLUMN executed INTEGER DEFAULT 0")
 
 
 def _now() -> str:
@@ -129,10 +133,15 @@ def save_signal(card) -> None:
     """保存信号卡（card 为 signal.engine.SignalCard 或含 to_dict 的对象）。"""
     d = card.to_dict() if hasattr(card, "to_dict") else card
     with _lock, _connect() as conn:
+        # UPSERT：更新信号内容但保留 executed 列（防幂等占位被 REPLACE 覆盖，H3）
         conn.execute(
-            "INSERT OR REPLACE INTO signals "
+            "INSERT INTO signals "
             "(id, symbol, direction, confidence, card_json, status, created_at, expires_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "symbol=excluded.symbol, direction=excluded.direction, confidence=excluded.confidence, "
+            "card_json=excluded.card_json, status=excluded.status, "
+            "created_at=excluded.created_at, expires_at=excluded.expires_at",
             (
                 d["id"], d["symbol"], d["direction"], d["confidence"],
                 __import__("json").dumps(d, ensure_ascii=False),
@@ -140,6 +149,22 @@ def save_signal(card) -> None:
                 d["created_at"], d["expires_at"],
             ),
         )
+
+
+def mark_signal_executed(signal_id: str) -> bool:
+    """原子占位（H3）：把信号标记为已执行；若已被占位/执行返回 False（防并发重复下单）。"""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "UPDATE signals SET executed = 1 WHERE id = ? AND (executed IS NULL OR executed = 0)",
+            (signal_id,),
+        )
+        return cur.rowcount > 0
+
+
+def unmark_signal_executed(signal_id: str) -> None:
+    """下单失败回滚占位（允许重试）。"""
+    with _lock, _connect() as conn:
+        conn.execute("UPDATE signals SET executed = 0 WHERE id = ?", (signal_id,))
 
 
 def has_active_signal(symbol: str, direction: str, strategy_pat: str) -> bool:

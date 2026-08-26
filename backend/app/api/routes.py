@@ -130,9 +130,14 @@ def execute_signal(signal_id: str, request: Request) -> dict:
         if amount <= 0:
             raise HTTPException(status_code=400, detail="可用余额不足以开仓")
 
+        # H3 原子占位：下单前先标记 executed（防并发/崩溃窗口"有单无记录"重复下单）
+        if not db.mark_signal_executed(signal_id):
+            raise HTTPException(status_code=409, detail="信号已被占用或执行")
+
         side = "buy" if direction == "long" else "sell"
         market = executor.create_order(symbol, side, amount, order_type="market")
         if not market.get("ok"):
+            db.unmark_signal_executed(signal_id)  # 下单失败回滚占位，允许重试
             raise HTTPException(status_code=502, detail=f"下单失败: {market.get('error')}")
 
         pid = db.create_position(symbol, direction, price, amount,

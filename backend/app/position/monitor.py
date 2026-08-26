@@ -70,8 +70,16 @@ class PositionMonitor:
         from ..position.manager import evaluate_stage
 
         res = evaluate_stage(pos, price, atr_v, ema21_1h)
-        if res.get("action") == "exit":
+        action = res.get("action")
+        if action == "exit":
             return {"exit": True, "reason": res.get("reason"), "price": price, "signal_id": pos.get("signal_id")}
+        if action == "move_stop":
+            # H2：保本/跟踪升级持久化（新止损价 + 阶段写回 DB，避免三段式升级失效）
+            db.update_position(
+                pos["id"],
+                stop_price=res.get("stop_price"),
+                stop_stage=res.get("stage", pos.get("stop_stage", 1)),
+            )
         return None
 
     def _close(self, pos: dict, outcome: dict) -> None:
