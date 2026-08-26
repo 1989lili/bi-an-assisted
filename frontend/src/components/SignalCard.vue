@@ -76,8 +76,7 @@
           ·仓位×{{ card.funding.position_factor }}
         </template>
       </span>
-      <!-- 暂隐藏「确认执行」：待高危项（鉴权/平仓发单/reduceOnly 等）修复后再启用 -->
-      <van-button v-if="false" size="mini" type="primary" class="exec-btn" :disabled="executing" @click="onExecute">
+      <van-button v-if="canExecute" size="mini" type="primary" class="exec-btn" :disabled="executing" @click="onExecute">
         {{ executing ? "执行中…" : "确认执行" }}
       </van-button>
     </div>
