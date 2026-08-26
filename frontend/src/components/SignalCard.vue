@@ -60,8 +60,8 @@
         <span class="exec-cell stop">
           <i>止损</i>{{ fmtPrice(card.execution?.stop_loss) }} {{ quote }}
         </span>
-        <span class="exec-cell" v-if="card.execution?.target || card.strategy === 'ema_trend'">
-          <i>第一目标</i>{{ card.execution?.target ? fmtPrice(card.execution.target) : '随趋势(EMA50)' }} {{ quote }}
+        <span class="exec-cell" v-if="targetDisplay || card.strategy === 'ema_trend'">
+          <i>第一目标</i>{{ targetDisplay ? fmtPrice(targetDisplay) : '随趋势(EMA50)' }} {{ quote }}
         </span>
       </div>
     </div>
@@ -125,6 +125,19 @@ const statusClass = computed(() => {
 const exitReason = computed(() => {
   const m = (props.card.reason || "").match(/离场[：:]\s*(.+)$/);
   return m ? m[1] : "";
+});
+
+// 第一目标止盈价：优先用执行计划真值；旧信号缺 target 时按 2.5×止损距离估算
+const targetDisplay = computed(() => {
+  const e = props.card.execution;
+  if (e?.target) return e.target;
+  const price = e?.market_price, stop = e?.stop_loss;
+  if (price && stop && stop > 0) {
+    const stopDist = Math.abs(price - stop);
+    const dir = props.card.direction === "long" ? 1 : -1;
+    return +(price + dir * stopDist * 2.5).toFixed(8);
+  }
+  return null;
 });
 
 // 实时价相对入场价浮动（方向色：做多涨绿跌红，做空反之）
