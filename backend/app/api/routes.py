@@ -77,6 +77,11 @@ class SettingValue(BaseModel):
     value: Any
 
 
+class ExecuteRequest(BaseModel):
+    """一键执行请求：budget_usdt 可选（用户确认页调整后的预算；缺省 = 总余额×EXEC_DEFAULT_BUDGET_PCT）。"""
+    budget_usdt: Optional[float] = None
+
+
 # ==================== 系统状态 ====================
 
 
@@ -170,11 +175,18 @@ def signal_stats() -> dict:
     return {"strategies": out}
 
 
+@router.get("/account")
+def get_account(request: Request) -> dict:
+    """账户余额（确认执行页拉取，用于计算默认预算 = 总余额×50%）。"""
+    return request.app.state.executor.fetch_balance()
+
+
 @router.post("/signals/{signal_id}/execute")
-def execute_signal(signal_id: str, request: Request) -> dict:
+def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = Body(default=ExecuteRequest())) -> dict:
     """一键执行信号：按信号卡执行计划下单（dry_run 下仅模拟）并创建本地持仓。
 
     幂等：进程内互斥锁 + executed 标记，防并发重复下单（单进程 uvicorn 下有效）。
+    budget_usdt: 确认页调整后的预算（缺省 = 总余额 × EXEC_DEFAULT_BUDGET_PCT = 50%）。
     """
     with _execute_lock:
         sig = db.get_signal(signal_id)
@@ -208,10 +220,12 @@ def execute_signal(signal_id: str, request: Request) -> dict:
         if total > 0 and pnl_today < 0 and abs(pnl_today) / total >= config.BINANCE_DAILY_LOSS_LIMIT:
             raise HTTPException(status_code=429, detail="当日亏损已达熔断线，暂停新开仓")
         free = float(bal.get("free") or 0)
-        # M2：应用仓位系数 position_factor（费率×波动率，波动大自动降仓），限制 0.1~1.0
-        pf = float(exec_plan.get("position_factor") or 1.0)
-        pf = max(0.1, min(1.0, pf))
-        budget = min(free, config.BINANCE_MAX_ORDER_USDT) * pf
+        # 默认预算 = 总余额 × EXEC_DEFAULT_BUDGET_PCT（50%）；用户确认页可传 budget_usdt 覆盖
+        if payload.budget_usdt is not None and payload.budget_usdt > 0:
+            budget = max(0.0, min(payload.budget_usdt, total))
+        else:
+            budget = total * config.EXEC_DEFAULT_BUDGET_PCT
+        budget = min(budget, free)  # 不能超过可用余额
         # 70/30 拆分：市价 70% + 限价 30%（exec_plan.limit_price = 前阳 50% 回撤位）
         market_pct = int(exec_plan.get("market_pct") or config.EXEC_MARKET_PCT * 100) / 100
         # M5：按币种数量精度截断 + 最小下单量校验（高币价币种精度低，直接 round 会被币安拒单）

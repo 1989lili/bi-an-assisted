@@ -35,7 +35,8 @@ export const http = {
 export const api = {
   status: () => http.get("/status"),
   signals: (params = "") => http.get(`/signals${params}`),
-  executeSignal: (id) => http.post(`/signals/${encodeURIComponent(id)}/execute`, {}),
+  executeSignal: (id, data) => http.post(`/signals/${encodeURIComponent(id)}/execute`, data || {}),
+  account: () => http.get("/account"),
   signalStats: () => http.get("/signal-stats"),
   symbolSnapshot: (symbol) => http.get(`/symbol/snapshot?symbol=${encodeURIComponent(symbol)}`),
   watchlist: () => http.get("/watchlist"),

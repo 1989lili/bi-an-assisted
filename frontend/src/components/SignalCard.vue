@@ -80,12 +80,28 @@
         {{ executing ? "执行中…" : "确认执行" }}
       </van-button>
     </div>
+
+    <!-- 一键执行确认弹窗（可调预算） -->
+    <van-dialog v-model:show="showExecDialog" title="确认执行" show-cancel-button @confirm="confirmExecute">
+      <div class="exec-dialog">
+        <div class="ed-row"><span>标的</span><b>{{ shortSymbol(card.symbol) }} {{ card.direction === "long" ? "做多" : "做空" }}</b></div>
+        <div class="ed-row"><span>杠杆</span><b>3 倍</b></div>
+        <div class="ed-row"><span>拆分</span><b>市价 70% + 限价 30%</b></div>
+        <div class="ed-row"><span>止损</span><b>{{ fmtPrice(card.execution?.stop_loss) }}</b></div>
+        <div class="ed-row"><span>第一目标</span><b>{{ targetDisplay ? fmtPrice(targetDisplay) : "-" }}</b></div>
+        <div class="ed-row">
+          <span>预算(USDT)</span>
+          <input v-model="execBudget" type="number" step="0.01" min="0" class="ed-input" />
+        </div>
+        <div class="ed-tip">默认 = 总余额 50%（当前 {{ (totalBalance * 0.5).toFixed(2) }} USDT）；可修改后确认</div>
+      </div>
+    </van-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { showConfirmDialog, showToast } from "vant";
+import { showToast } from "vant";
 import {
   fmtClock, fmtPct, fmtPrice, fmtTime, shortSymbol, quoteSymbol,
   FUNDING_TIER, LEVEL_LABEL,
@@ -177,18 +193,35 @@ const canExecute = computed(() =>
     && now.value <= (props.card.expires_at || 0),
 );
 const executing = ref(false);
+const showExecDialog = ref(false);
+const execBudget = ref(0);
+const totalBalance = ref(0);
+
+// 一键执行：先拉余额 → 弹出可调预算的确认框（默认 = 总余额 50%）
 async function onExecute() {
   try {
-    await showConfirmDialog({
-      title: "确认执行",
-      message: `确认对 ${shortSymbol(props.card.symbol)} 下达 ${props.card.direction === "long" ? "做多" : "做空"} 市价单？`,
-    });
-  } catch (_) {
+    const acct = await api.account();
+    if (!acct.ok) {
+      showToast(acct.error || "账户余额获取失败");
+      return;
+    }
+    totalBalance.value = Number(acct.total) || 0;
+    execBudget.value = Math.floor(totalBalance.value * 0.5 * 100) / 100; // 默认 50%
+    showExecDialog.value = true;
+  } catch (e) {
+    showToast(e.message);
+  }
+}
+async function confirmExecute() {
+  const b = Number(execBudget.value) || 0;
+  if (b <= 0) {
+    showToast("预算需大于 0");
     return;
   }
+  showExecDialog.value = false;
   executing.value = true;
   try {
-    const r = await api.executeSignal(props.card.id);
+    const r = await api.executeSignal(props.card.id, { budget_usdt: b });
     showToast(r.dry_run ? "纸面模拟下单成功" : `实盘下单成功（${r.side} ${r.amount}）`);
   } catch (e) {
     showToast(e.message);
@@ -309,6 +342,18 @@ function okClass(v) {
   border-top: 1px solid #2c2c2e; padding-top: 8px;
 }
 .exec-btn { margin-left: auto; }
+.exec-dialog { padding: 6px 16px 4px; }
+.ed-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; padding: 7px 0; border-bottom: 1px solid #2c2c2e;
+}
+.ed-row span { color: #8e8e93; }
+.ed-row b { color: #e8e8ea; }
+.ed-input {
+  width: 120px; text-align: right; background: #2c2c2e; border: none;
+  border-radius: 6px; padding: 6px 8px; color: #34c759; font-size: 15px; outline: none;
+}
+.ed-tip { font-size: 11px; color: #8e8e93; padding: 8px 0 4px; }
 .rr { font-size: 12px; color: #e8e8ea; font-weight: 600; }
 .funding { font-size: 12px; }
 </style>
