@@ -176,6 +176,13 @@ def execute_signal(signal_id: str, request: Request) -> dict:
         pid = db.create_position(symbol, direction, price, amount,
                                  stop_price=exec_plan.get("stop_loss") or None, stop_stage=1,
                                  strategy=sig.get("strategy") or "short", signal_id=signal_id)
+        # H7：给持仓挂交易所侧 STOP_MARKET 止损单（进程外保护；失败不阻塞，position_monitor 兜底）
+        stop_price = exec_plan.get("stop_loss")
+        if stop_price:
+            stop_side = "sell" if direction == "long" else "buy"
+            stop_order = executor.create_stop_loss_order(symbol, stop_side, amount, float(stop_price))
+            if stop_order.get("ok"):
+                db.update_position(pid, stop_order_id=stop_order.get("id"))
         sig["executed"] = True
         sig["executed_at"] = int(time.time() * 1000)
         sig["exec_side"] = side
@@ -269,6 +276,10 @@ def close_position(position_id: int, request: Request) -> dict:
     except Exception:  # noqa: BLE001 - 行情不可用时按入场价估算
         pass
 
+    # H7：平仓前先撤交易所侧止损单（防平仓后止损单残留）
+    stop_order_id = pos.get("stop_order_id")
+    if stop_order_id:
+        executor.cancel_order(pos["symbol"], stop_order_id)
     side = "sell" if pos["direction"] == "long" else "buy"
     qty = float(pos.get("qty") or 0)
     order = executor.create_order(pos["symbol"], side, qty, order_type="market", reduce_only=True)

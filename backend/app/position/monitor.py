@@ -86,6 +86,10 @@ class PositionMonitor:
         if not self.executor.configured:
             logger.warning("未配置币安凭据，无法自动平仓 %s", pos.get("symbol"))
             return
+        # H7：平仓前先撤交易所侧止损单
+        stop_order_id = pos.get("stop_order_id")
+        if stop_order_id:
+            self.executor.cancel_order(pos["symbol"], stop_order_id)
         side = "sell" if pos["direction"] == "long" else "buy"
         order = self.executor.create_order(pos["symbol"], side, float(pos.get("qty") or 0),
                                            order_type="market", reduce_only=True)

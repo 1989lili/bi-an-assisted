@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS positions (
     strategy    TEXT DEFAULT 'short',    -- short / ema_trend
     signal_id   TEXT,                    -- 关联信号卡 id
     realized_pnl REAL,                   -- 平仓时写入的已实现盈亏（USDT）
+    stop_order_id TEXT,                  -- 交易所侧 STOP_MARKET 止损单 id（H7）
     opened_at   TEXT NOT NULL,
     closed_at   TEXT
 );
@@ -94,6 +95,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("strategy", "ALTER TABLE positions ADD COLUMN strategy TEXT DEFAULT 'short'"),
         ("signal_id", "ALTER TABLE positions ADD COLUMN signal_id TEXT"),
         ("realized_pnl", "ALTER TABLE positions ADD COLUMN realized_pnl REAL"),
+        ("stop_order_id", "ALTER TABLE positions ADD COLUMN stop_order_id TEXT"),
     ):
         if col not in pos_cols:
             conn.execute(ddl)
@@ -262,7 +264,7 @@ def get_position(position_id: int) -> dict | None:
 def update_position(position_id: int, **fields) -> bool:
     """按字段名白名单更新持仓（防注入）。"""
     allowed = {"direction", "entry_price", "qty", "stop_stage", "stop_price", "status",
-               "strategy", "signal_id", "realized_pnl", "closed_at"}
+               "strategy", "signal_id", "realized_pnl", "stop_order_id", "closed_at"}
     cols = {k: v for k, v in fields.items() if k in allowed}
     if not cols:
         return False

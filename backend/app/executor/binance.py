@@ -142,6 +142,30 @@ class BinanceExecutor:
             logger.error("下单失败 %s %s %s: %s", symbol, side, amount, exc)
             return {"ok": False, "error": str(exc)}
 
+    def create_stop_loss_order(self, symbol: str, side: str, amount: float, stop_price: float) -> dict:
+        """交易所侧 STOP_MARKET 止损单（H7，进程外保护）。
+
+        side: 平仓方向（多头→sell / 空头→buy）；stop_price: 触发止损价。
+        """
+        if not self.configured:
+            return {"ok": False, "error": "未配置 BINANCE_API_KEY/SECRET"}
+        if self.dry_run:
+            logger.info("[DRY-RUN] STOP_MARKET %s %s amount=%s stop=%s", side, symbol, amount, stop_price)
+            return {"ok": True, "dry_run": True, "id": f"dry_stop_{int(time.time() * 1000)}",
+                    "symbol": symbol, "side": side, "stop_price": stop_price, "status": "open"}
+        try:
+            ex = self._client()
+            order = ex.create_order(
+                symbol, "STOP_MARKET", side, amount,
+                params={"stopPrice": stop_price, "reduceOnly": True},
+            )
+            return {"ok": True, "dry_run": False, "id": order.get("id"),
+                    "symbol": symbol, "side": side, "stop_price": stop_price,
+                    "status": order.get("status")}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("挂止损单失败 %s %s stop=%s: %s", symbol, side, stop_price, exc)
+            return {"ok": False, "error": str(exc)}
+
     def cancel_order(self, symbol: str, order_id: str) -> dict:
         if self.dry_run:
             return {"ok": True, "dry_run": True, "id": order_id, "cancelled": True}
