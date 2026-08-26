@@ -107,3 +107,25 @@
 2. 熔断阈值、每日开仓上限具体值。
 3. 初始测试资金量级与币种偏好。
 4. 扳机灵敏度档位默认值（N0.1 先默认 3）。
+
+## 8. 代码审查待办清单（实盘前必须清的高危项）
+
+> 来源：独立代码审查报告（H=高危 / M=中危）。已完成的标 [x] 并注明 commit。
+
+### 高危
+- [ ] H6 加鉴权 + `PUT /api/settings` 白名单（防改 dry_run/限额/下单）
+- [ ] H4 手动平仓真正发币安单 + 自动平仓校验订单结果
+- [ ] H5 平仓单加 `reduceOnly` 防反向开仓
+- [ ] H7 实盘前给持仓挂交易所侧止损单
+- [x] H3 幂等（进程内互斥锁已加 `e3b4b7a`；下单前原子占位待做）
+- [x] H2 三段式键名统一（evaluate_stage 读 stop_stage 已修 `e3b4b7a`；move_stop 持久化待做）
+- [ ] H1 市场环境门：做空遇 bull 补 `return None` 拦截
+- [x] H8 信号去重 + 冷却（`8fe6358`）
+
+### 中危
+- [x] M4 前端处理 `position:update`（Positions.vue 已订阅）
+- [ ] M1 策略一时间止损对持仓生效（position_monitor 传 elapsed_bars）
+- [ ] M2 下单应用 position_factor/market_pct，移除死参数
+- [ ] M3 手动平仓写入 realized_pnl（供熔断统计）
+- [ ] M5 下单金额按币种精度截断 + 最小下单量校验
+- [ ] M7 set_leverage 失败即拒绝下单

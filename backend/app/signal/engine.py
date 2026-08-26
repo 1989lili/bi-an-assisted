@@ -110,6 +110,7 @@ class SignalEngine:
             return None
         if direction == "short" and env == "bull":
             self.rejections[symbol] = "市场环境拦截：大盘多头，不做空"
+            return None
 
         # ---------- 2️⃣ 双周期扳机 ----------
         trigger_level = self._trigger(s15m, s5m, direction)
