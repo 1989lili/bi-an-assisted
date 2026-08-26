@@ -10,8 +10,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+
+from . import config
 
 from .api.routes import router
 from .calendar.macro import seed_builtin_events
@@ -101,6 +104,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="币安 U 本位合约辅助决策工具", version="0.3.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """H6 HTTP 鉴权：APP_AUTH_TOKEN 非空时，/api 请求需 Bearer header 或 ?token=。"""
+    token = getattr(config, "APP_AUTH_TOKEN", "") or ""
+    if token and request.url.path.startswith("/api"):
+        auth = request.headers.get("Authorization", "")
+        if auth == f"Bearer {token}" or request.query_params.get("token") == token:
+            pass
+        else:
+            return JSONResponse({"detail": "未授权访问"}, status_code=401)
+    return await call_next(request)
+
+
 app.include_router(router)
 
 # 前端静态托管（M4 构建产物；目录不存在时 API 仍可用）

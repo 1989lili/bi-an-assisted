@@ -18,20 +18,7 @@ from ..position.manager import initial_stop, position_snapshot
 from ..store import db
 
 
-def _require_auth(request: Request) -> None:
-    """H6 鉴权：APP_AUTH_TOKEN 非空时，所有 /api 请求需 Authorization: Bearer <token>。
-
-    WebSocket 场景：浏览器 WS 无法自定义 Authorization 头，允许 query 参数 ?token=xxx。
-    """
-    token = getattr(config, "APP_AUTH_TOKEN", "") or ""
-    if not token:
-        return
-    if request.headers.get("Authorization", "") == f"Bearer {token}":
-        return
-    if request.query_params.get("token") == token:
-        return
-    raise HTTPException(status_code=401, detail="未授权访问")
-
+# H6 鉴权由 main.py 的 HTTP 中间件统一处理（WS 在端点内校验 query token）
 
 # H6 白名单：允许运行时修改的策略参数（禁止 BINANCE_*/路径/鉴权等敏感项）
 _SETTING_ALLOWLIST = frozenset({
@@ -55,7 +42,7 @@ _SETTING_ALLOWLIST = frozenset({
     "CANDIDATE_TOP_CHANGE", "CANDIDATE_TOP_GAIN",
 })
 
-router = APIRouter(prefix="/api", dependencies=[Depends(_require_auth)])
+router = APIRouter(prefix="/api")
 
 
 # ==================== 数据模型 ====================
@@ -519,6 +506,11 @@ def list_scan_logs(limit: int = 100) -> list[dict]:
 
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
+    # H6：WS 鉴权（浏览器 WS 无法带 header，用 query ?token=xxx）
+    token = getattr(config, "APP_AUTH_TOKEN", "") or ""
+    if token and ws.query_params.get("token") != token:
+        await ws.close(code=4401)
+        return
     await manager.connect(ws)
     try:
         while True:
