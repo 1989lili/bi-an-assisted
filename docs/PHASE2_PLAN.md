@@ -124,8 +124,8 @@
 
 ### 中危
 - [x] M4 前端处理 `position:update`（Positions.vue 已订阅）
-- [ ] M1 策略一时间止损对持仓生效（position_monitor 传 elapsed_bars）
-- [ ] M2 下单应用 position_factor/market_pct，移除死参数
+- [x] M1 策略一时间止损对持仓生效（`f721deb`）
+- [x] M2 下单应用 position_factor + 市价70%/限价30%拆分（`c93b333`）
 - [x] M3 手动平仓写入 realized_pnl（`20499ba`）
-- [ ] M5 下单金额按币种精度截断 + 最小下单量校验
+- [x] M5 下单金额按币种精度截断 + 最小下单量校验（`107ce80`）
 - [x] M7 set_leverage 失败即拒绝下单（`06191ea`）
