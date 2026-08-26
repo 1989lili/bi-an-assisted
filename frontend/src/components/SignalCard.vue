@@ -24,6 +24,7 @@
 
     <!-- 行3 信号摘要（新信号已精简为扳机+量比；旧数据最多 2 行省略） -->
     <div class="reason" v-if="card.reason">{{ card.reason }}</div>
+    <div class="exit-reason" v-if="exitReason">离场原因：{{ exitReason }}</div>
 
     <!-- 行4 引擎关卡 -->
     <div class="levels">
@@ -110,14 +111,20 @@ const ttlMin = computed(() =>
 
 // 生命周期状态（高频监控判定）：有效 / 已止损 / 已过期
 const statusText = computed(() => {
-  if (props.card.status === "stopped_out") return "已止损";
+  if (props.card.status === "stopped_out") return "已离场";
   if (expired.value) return "已过期";
   return "有效";
 });
 const statusClass = computed(() => {
-  if (props.card.status === "stopped_out") return "bad";
+  if (props.card.status === "stopped_out") return "gray";
   if (expired.value) return "gray";
   return "ok";
+});
+
+// (stopped_out) 离场原因：提取 reason 中"离场：xxx"（如"收盘跌破 EMA50"）
+const exitReason = computed(() => {
+  const m = (props.card.reason || "").match(/离场[：:]\s*(.+)$/);
+  return m ? m[1] : "";
 });
 
 // 实时价相对入场价浮动（方向色：做多涨绿跌红，做空反之）
@@ -243,6 +250,10 @@ function okClass(v) {
   margin: 8px 0; font-size: 13px; color: #c7c7cc; line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.exit-reason {
+  margin: 4px 0 8px; font-size: 12px; color: #ff9f1c;
+  background: rgba(255, 159, 28, 0.08); border-radius: 6px; padding: 4px 8px;
 }
 
 /* 行4 关卡 */
