@@ -229,6 +229,14 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
         if market_amount <= 0 or (min_amt > 0 and market_amount < min_amt):
             raise HTTPException(status_code=400,
                                 detail=f"市价腿数量 {market_amount} 低于币种最小下单量 {min_amt}")
+        # 币安 U 本位最小名义价值（开仓单非 reduceOnly 必须满足）
+        notional = market_amount * price
+        if notional < config.BINANCE_MIN_NOTIONAL:
+            raise HTTPException(
+                status_code=400,
+                detail=f"下单名义价值 {notional:.2f} USDT 低于币安最小名义 "
+                       f"{config.BINANCE_MIN_NOTIONAL} USDT（当前余额/预算不足，请充值或调高预算）",
+            )
 
         # H3 原子占位：下单前先标记 executed（防并发/崩溃窗口"有单无记录"重复下单）
         if not db.mark_signal_executed(signal_id):

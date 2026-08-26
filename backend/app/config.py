@@ -95,6 +95,7 @@ BINANCE_API_SECRET = ""            # 敏感字段：GET /api/settings 不外泄
 BINANCE_DRY_RUN = True             # 纸面模式（默认开）；确认小额实盘后再置 False
 BINANCE_MAX_ORDER_USDT = 100       # 单笔下单金额上限（USDT，防误操作超仓）
 BINANCE_MAX_LEVERAGE = 3           # 交易杠杆上限（≤3 倍，风控）
+BINANCE_MIN_NOTIONAL = 5           # 币安 U 本位最小名义价值（USDT，开仓单必须 ≥5）
 BINANCE_DAILY_OPEN_LIMIT = 5       # 每日最大开仓次数
 BINANCE_DAILY_LOSS_LIMIT = 0.05    # 单日亏损熔断（占总资金比例）
 
