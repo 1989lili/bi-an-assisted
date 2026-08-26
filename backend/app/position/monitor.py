@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -15,6 +16,27 @@ from ..indicators.engine import atr, ema
 from ..store import db
 
 logger = logging.getLogger(__name__)
+
+
+def _entry_bar_ms() -> int:
+    """策略一入场周期单根 K 线毫秒数（时间止损用）。"""
+    tf = config.EMA_TREND_TIMEFRAMES["entry"]
+    minutes = {"5m": 5, "15m": 15, "1h": 60, "4h": 240}.get(tf, 15)
+    return minutes * 60 * 1000
+
+
+def _elapsed_bars(pos: dict) -> Optional[int]:
+    """持仓已过入场周期 K 线数（M1：策略一时间止损对持仓生效）。"""
+    opened = pos.get("opened_at")
+    if not opened:
+        return None
+    try:
+        opened_ms = int(datetime.fromisoformat(opened).timestamp() * 1000)
+    except (ValueError, TypeError):
+        return None
+    bar_ms = _entry_bar_ms()
+    now_ms = int(time.time() * 1000)
+    return int((now_ms - opened_ms) / bar_ms) if bar_ms else None
 
 
 class PositionMonitor:
@@ -58,7 +80,8 @@ class PositionMonitor:
             db.save_signal(sig)
             from ..strategy.ema_trend import check_exit
 
-            reason = check_exit(sig, df15)
+            # M1：时间止损按持仓时长计算（否则 48 根未创新高对持仓永不触发）
+            reason = check_exit(sig, df15, elapsed_bars=_elapsed_bars(pos))
             if reason:
                 return {"exit": True, "reason": reason, "price": price, "signal_id": pos.get("signal_id")}
             return None
