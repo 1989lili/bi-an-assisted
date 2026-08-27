@@ -99,17 +99,11 @@ class SignalEngine:
             self.rejections[symbol] = "数据不足（<60 根 K 线）"
             return None
 
-        # ---------- 0️⃣ 市场环境 ----------
+        # ---------- 0️⃣ 市场环境（已移除拦截：短线代币与 BTC 此消彼长，不强制同向；仅用于打分加分） ----------
         env = market_env.get("env", "neutral")
         direction = self._direction_gate(s4h, s1h)
         if direction is None:
             self.rejections[symbol] = "方向门未开（趋势不一致或 ADX 不足）"
-            return None
-        if direction == "long" and env == "bear":
-            self.rejections[symbol] = "市场环境拦截：大盘空头，不做多"
-            return None
-        if direction == "short" and env == "bull":
-            self.rejections[symbol] = "市场环境拦截：大盘多头，不做空"
             return None
 
         # ---------- 2️⃣ 双周期扳机 ----------
