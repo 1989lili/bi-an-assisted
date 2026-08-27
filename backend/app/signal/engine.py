@@ -16,6 +16,7 @@ from .. import config
 from ..indicators.engine import (
     compute_funding_tier,
     compute_indicator_snapshot,
+    estimate_liq_price,
     nearest_zone_distance,
     volatility_coef,
 )
@@ -289,11 +290,14 @@ class SignalEngine:
         atr15 = s15m["atr"]
         stop_dist = coef * atr15
 
-        # 清算距离检查
-        liq_dist = nearest_zone_distance(price, zones, direction)
-        liq_dist_atr = (liq_dist / atr15) if liq_dist is not None else None
-        if liq_dist is not None and liq_dist < stop_dist:
-            return None  # 现价距清算密集区太近，可能接针
+        # 清算距离检查（真实预估强平价）：现价距强平价 ≥ 系数×ATR（N=带宽系数 1.0/1.5/2.0）
+        liq_price = estimate_liq_price(
+            price, direction, config.BINANCE_RISK_LEVERAGE, config.BINANCE_MAINT_MARGIN_RATE
+        )
+        liq_dist = abs(price - liq_price)
+        liq_dist_atr = (liq_dist / atr15) if atr15 > 0 else None
+        if liq_dist_atr is not None and liq_dist < stop_dist:
+            return None  # 强平价离现价太近（相对止损距离），风险过高
 
         # 盈亏比：目标 = 1h 最近 swing 高点/低点；无参考则按 2.5 倍止损距离估算
         if direction == "long":

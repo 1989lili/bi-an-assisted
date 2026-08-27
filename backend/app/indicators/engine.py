@@ -174,6 +174,18 @@ def estimate_liquidity_zones(df: pd.DataFrame, lookback: int = 100, bins: int = 
     return zones
 
 
+def estimate_liq_price(price: float, direction: str, leverage: float, mmr: float = 0.005) -> float:
+    """预估强平价格（逐仓，U 本位）。
+
+    多头强平价 = P0 × (1 − 1/杠杆 + 维持保证金率)；空头对称。
+    """
+    if leverage <= 0:
+        return price
+    if direction == "long":
+        return price * (1 - 1 / leverage + mmr)
+    return price * (1 + 1 / leverage - mmr)
+
+
 def nearest_zone_distance(price: float, zones: list[tuple[float, float]], direction: str) -> Optional[float]:
     """现价到最近清算密集区的距离（价格单位）。
 
