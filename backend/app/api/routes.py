@@ -228,6 +228,10 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
         # M5：按币种数量精度截断 + 最小下单量校验（高币价币种精度低，直接 round 会被币安拒单）
         market_amount = executor.amount_to_precision(symbol, round(budget * market_pct / price, 8))
         limit_amount = executor.amount_to_precision(symbol, round(budget * (1 - market_pct) / price, 8))
+        # 限价腿名义不足币安最小名义（5U）时并入市价腿（否则限价单 -4164）
+        if limit_amount > 0 and limit_amount * price < config.BINANCE_MIN_NOTIONAL:
+            market_amount = executor.amount_to_precision(symbol, market_amount + limit_amount)
+            limit_amount = 0.0
         amount = market_amount + limit_amount  # 总计划仓位（含限价腿）
         min_amt = executor.min_amount(symbol)
         if market_amount <= 0 or (min_amt > 0 and market_amount < min_amt):
@@ -254,6 +258,7 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
             raise HTTPException(status_code=502, detail=lev_res.get("error"))
 
         side = "buy" if direction == "long" else "sell"
+        # 双向持仓模式下开仓单的 positionSide 按订单方向（buy→LONG / sell→SHORT），自动处理
         market = executor.create_order(symbol, side, market_amount, order_type="market")
         if not market.get("ok"):
             db.unmark_signal_executed(signal_id)  # 下单失败回滚占位，允许重试
@@ -273,7 +278,9 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
         stop_price = exec_plan.get("stop_loss")
         if stop_price:
             stop_side = "sell" if direction == "long" else "buy"
-            stop_order = executor.create_stop_loss_order(symbol, stop_side, amount, float(stop_price))
+            pos_side = "LONG" if direction == "long" else "SHORT"
+            stop_order = executor.create_stop_loss_order(symbol, stop_side, amount, float(stop_price),
+                                                         position_side=pos_side)
             if stop_order.get("ok"):
                 db.update_position(pid, stop_order_id=stop_order.get("id"))
         sig["executed"] = True
@@ -287,7 +294,8 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
             "position_id": pid, "side": side, "amount": amount,
             "order_id": market.get("id"), "price": price,
             "limit_order_id": limit_order.get("id") if limit_order else None,
-            "budget_usdt": budget, "position_factor": pf, "mode": executor.mode_label,
+            "budget_usdt": budget, "position_factor": exec_plan.get("position_factor"),
+            "mode": executor.mode_label,
         }
 
 
@@ -375,8 +383,10 @@ def close_position(position_id: int, request: Request) -> dict:
     if stop_order_id:
         executor.cancel_order(pos["symbol"], stop_order_id)
     side = "sell" if pos["direction"] == "long" else "buy"
+    pos_side = "LONG" if pos["direction"] == "long" else "SHORT"
     qty = float(pos.get("qty") or 0)
-    order = executor.create_order(pos["symbol"], side, qty, order_type="market", reduce_only=True)
+    order = executor.create_order(pos["symbol"], side, qty, order_type="market", reduce_only=True,
+                                  position_side=pos_side)
     if not order.get("ok"):
         raise HTTPException(status_code=502, detail=f"平仓下单失败: {order.get('error')}")
 

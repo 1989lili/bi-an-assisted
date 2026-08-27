@@ -25,6 +25,42 @@ class BinanceExecutor:
         self.api_key = config.BINANCE_API_KEY or ""
         self.api_secret = config.BINANCE_API_SECRET or ""
         self.dry_run = bool(config.BINANCE_DRY_RUN)
+        self._dual_mode: Optional[bool] = None  # 账户双向持仓模式缓存（Hedge Mode）
+
+    # ---------- 持仓模式（双向/单向） ----------
+
+    def _dual_position_mode(self) -> bool:
+        """账户是否双向持仓模式（Hedge Mode）：双向下单必须带 positionSide。
+
+        结果缓存（模式基本不变）；查询失败按单向处理（避免阻断下单）。
+        """
+        if not self.configured or self.dry_run:
+            return False
+        if self._dual_mode is None:
+            try:
+                res = self._client().fapiPrivateGetPositionSideDual()
+                self._dual_mode = str(res.get("dualSidePosition", "false")).lower() == "true"
+                logger.info("币安持仓模式: %s", "双向(hedge)" if self._dual_mode else "单向")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("持仓模式查询失败（按单向处理）: %s", exc)
+                self._dual_mode = False
+        return self._dual_mode
+
+    def _order_params(self, side: str, reduce_only: bool = False, position_side: str | None = None) -> dict:
+        """下单附加参数：双向模式下带 positionSide；平仓带 reduceOnly。
+
+        position_side: 该订单作用的持仓侧（LONG/SHORT）。开仓不传时按订单方向
+        （buy→LONG / sell→SHORT）；**平仓必须由调用方传持仓侧**（平多=sell 单但
+        positionSide=LONG，否则 -4061）。
+        """
+        params = {}
+        if reduce_only and not self._dual_position_mode():
+            # 单向模式：平仓必须带 reduceOnly 防反向开仓；
+            # 双向模式：positionSide 已限定持仓侧，币安不接受冗余 reduceOnly（-1106）。
+            params["reduceOnly"] = True
+        if self._dual_position_mode():
+            params["positionSide"] = position_side or ("LONG" if side == "buy" else "SHORT")
+        return params
 
     # ---------- 配置 ----------
 
@@ -73,7 +109,10 @@ class BinanceExecutor:
             return {"ok": False, "error": str(exc)}
 
     def fetch_positions(self) -> list[dict]:
-        """U 本位持仓列表（过滤空仓）。"""
+        """U 本位持仓列表（过滤空仓）。
+
+        双向持仓模式下 ccxt 的 contracts 可能为绝对值，方向以 `side` 字段为准。
+        """
         if not self.configured:
             return []
         try:
@@ -84,7 +123,7 @@ class BinanceExecutor:
                     continue
                 out.append({
                     "symbol": p.get("symbol"),
-                    "side": "long" if contracts > 0 else "short",
+                    "side": p.get("side") or ("long" if contracts > 0 else "short"),
                     "contracts": abs(contracts),
                     "entry_price": p.get("entryPrice"),
                     "unrealized_pnl": p.get("unrealizedPnl"),
@@ -112,10 +151,11 @@ class BinanceExecutor:
 
     def create_order(self, symbol: str, side: str, amount: float,
                      order_type: str = "market", price: Optional[float] = None,
-                     reduce_only: bool = False) -> dict:
+                     reduce_only: bool = False, position_side: Optional[str] = None) -> dict:
         """创建订单。side: buy/sell；amount: 合约数量。
 
         reduce_only=True 时下单带 reduceOnly（平仓单，防止无持仓时误开反向新仓，H5）。
+        position_side: 双向持仓模式下平仓单需传持仓侧（LONG/SHORT），开仓可不传。
         dry_run=True 时仅模拟记录并返回模拟订单。
         """
         if amount <= 0:
@@ -135,8 +175,7 @@ class BinanceExecutor:
             kwargs = {}
             if order_type == "limit" and price is not None:
                 kwargs["price"] = price
-            if reduce_only:
-                kwargs["params"] = {"reduceOnly": True}  # 平仓单：只减仓，防反向开仓
+            kwargs["params"] = self._order_params(side, reduce_only, position_side)  # 双向模式带 positionSide；平仓带 reduceOnly
             order = ex.create_order(symbol, order_type, side, amount, **kwargs)
             return {
                 "ok": True, "dry_run": False,
@@ -149,10 +188,12 @@ class BinanceExecutor:
             logger.error("下单失败 %s %s %s: %s", symbol, side, amount, exc)
             return {"ok": False, "error": str(exc)}
 
-    def create_stop_loss_order(self, symbol: str, side: str, amount: float, stop_price: float) -> dict:
+    def create_stop_loss_order(self, symbol: str, side: str, amount: float, stop_price: float,
+                               position_side: Optional[str] = None) -> dict:
         """交易所侧 STOP_MARKET 止损单（H7，进程外保护）。
 
-        side: 平仓方向（多头→sell / 空头→buy）；stop_price: 触发止损价。
+        side: 平仓方向（多头→sell / 空头→buy）；stop_price: 触发止损价；
+        position_side: 双向模式下传持仓侧（多头→LONG / 空头→SHORT）。
         """
         if not self.configured:
             return {"ok": False, "error": "未配置 BINANCE_API_KEY/SECRET"}
@@ -164,7 +205,7 @@ class BinanceExecutor:
             ex = self._client()
             order = ex.create_order(
                 symbol, "STOP_MARKET", side, amount,
-                params={"stopPrice": stop_price, "reduceOnly": True},
+                params={"stopPrice": stop_price, **self._order_params(side, True, position_side)},
             )
             return {"ok": True, "dry_run": False, "id": order.get("id"),
                     "symbol": symbol, "side": side, "stop_price": stop_price,

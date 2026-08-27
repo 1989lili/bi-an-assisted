@@ -142,7 +142,8 @@ class PositionMonitor:
             min_qty = self.executor.min_amount(pos["symbol"]) or 0
             if reduce_qty > 0 and remain >= min_qty:
                 order = self.executor.create_order(pos["symbol"], side, reduce_qty,
-                                                   order_type="market", reduce_only=True)
+                                                   order_type="market", reduce_only=True,
+                                                   position_side="LONG" if direction == "long" else "SHORT")
                 if order.get("ok"):
                     db.update_position(pos["id"], qty=remain)
                     qty = remain
@@ -165,7 +166,10 @@ class PositionMonitor:
         new_stop_id = pos.get("stop_order_id")
         if new_stop_id and self.executor.configured:
             self.executor.cancel_order(pos["symbol"], new_stop_id)
-            stop_order = self.executor.create_stop_loss_order(pos["symbol"], side, qty, new_stop)
+            stop_order = self.executor.create_stop_loss_order(
+                pos["symbol"], side, qty, new_stop,
+                position_side="LONG" if direction == "long" else "SHORT",
+            )
             new_stop_id = stop_order.get("id") if stop_order.get("ok") else None
         db.update_position(pos["id"], stop_price=new_stop, macro_protected=1,
                            stop_order_id=new_stop_id or None)
@@ -181,8 +185,9 @@ class PositionMonitor:
         if stop_order_id:
             self.executor.cancel_order(pos["symbol"], stop_order_id)
         side = "sell" if pos["direction"] == "long" else "buy"
+        pos_side = "LONG" if pos["direction"] == "long" else "SHORT"
         order = self.executor.create_order(pos["symbol"], side, float(pos.get("qty") or 0),
-                                           order_type="market", reduce_only=True)
+                                           order_type="market", reduce_only=True, position_side=pos_side)
         if not order.get("ok"):
             # H4：下单失败不回滚为 closed（保持 open，下轮重试）
             logger.error("自动平仓下单失败 %s %s: %s", pos["symbol"], pos["direction"], order.get("error"))
