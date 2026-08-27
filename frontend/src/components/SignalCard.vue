@@ -10,7 +10,7 @@
       <span class="trigger-chip" v-if="card.trigger_level">
         {{ levelText }}
       </span>
-      <span class="confidence" :class="confClass">{{ card.confidence }}</span>
+      <span class="confidence" :class="confClass" @click="showScore = true">{{ card.confidence }}</span>
     </div>
 
     <!-- 行2 元信息：生成时间 + 生命周期状态 + 剩余有效期 -->
@@ -26,7 +26,7 @@
     <div class="reason" v-if="card.reason">{{ card.reason }}</div>
     <div class="exit-reason" v-if="exitReason">离场原因：{{ exitReason }}</div>
 
-    <!-- 行4 引擎关卡 -->
+    <!-- 行4 引擎关卡（点击"详情"查看各关卡判定数值） -->
     <div class="levels">
       <span
         v-for="(v, k) in card.levels"
@@ -35,6 +35,9 @@
         :class="okClass(v)"
       >
         {{ LEVEL_LABEL[k] || k }}:{{ v === true ? "✓" : v === false ? "✗" : v }}
+      </span>
+      <span class="level-detail-link" v-if="levelDetailRows.length" @click="showLevels = true">
+        <van-icon name="records" /> 详情
       </span>
     </div>
 
@@ -99,6 +102,33 @@
         <div class="ed-tip">默认 = 总余额 50%（当前 {{ (totalBalance * 0.5).toFixed(2) }} USDT）；可修改后确认</div>
       </div>
     </van-dialog>
+
+    <!-- 评分明细弹窗（点击分数） -->
+    <van-popup v-model:show="showScore" position="bottom" round class="detail-popup">
+      <div class="detail-head">评分明细 · {{ card.confidence }} 分<span class="pass-line">通过线 {{ card.score_pass_line ?? 60 }}</span></div>
+      <div class="score-group" v-for="g in scoreGroups" :key="g.cat">
+        <div class="score-cat">{{ g.cat }}（{{ g.sum }}/{{ g.maxSum }}）</div>
+        <div class="score-row" v-for="it in g.items" :key="it.name">
+          <span class="score-name">{{ it.name }}</span>
+          <span class="score-note">{{ it.note }}</span>
+          <b class="score-val" :class="{ miss: it.score < it.max && it.max > 0 }">{{ it.score }}/{{ it.max }}</b>
+        </div>
+      </div>
+      <div class="detail-empty" v-if="!card.score_detail?.length">（旧信号无评分明细）</div>
+    </van-popup>
+
+    <!-- 关卡详情弹窗（点击"详情"） -->
+    <van-popup v-model:show="showLevels" position="bottom" round class="detail-popup">
+      <div class="detail-head">信号满足条件（关卡判定值）</div>
+      <div class="score-group" v-for="(kv, cat) in card.levels_detail" :key="cat">
+        <div class="score-cat">{{ cat }}</div>
+        <div class="score-row" v-for="(v, k) in kv" :key="k">
+          <span class="score-name">{{ k }}</span>
+          <b class="score-val">{{ fmtDetailVal(v) }}</b>
+        </div>
+      </div>
+      <div class="detail-empty" v-if="!levelDetailRows.length">（旧信号无关卡明细）</div>
+    </van-popup>
   </div>
 </template>
 
@@ -112,6 +142,37 @@ import {
 import { api } from "../api/http";
 
 const props = defineProps({ card: Object });
+
+const showScore = ref(false);
+const showLevels = ref(false);
+
+// 评分明细按类别分组（含各类合计）
+const scoreGroups = computed(() => {
+  const items = props.card.score_detail || [];
+  const groups = [];
+  for (const it of items) {
+    let g = groups.find((x) => x.cat === it.cat);
+    if (!g) {
+      g = { cat: it.cat, items: [], sum: 0, maxSum: 0 };
+      groups.push(g);
+    }
+    g.items.push(it);
+    g.sum += it.score;
+    g.maxSum += it.max;
+  }
+  return groups;
+});
+// 关卡详情行数（决定"详情"入口是否显示）
+const levelDetailRows = computed(() => {
+  const ld = props.card.levels_detail;
+  return ld && typeof ld === "object" ? Object.keys(ld) : [];
+});
+function fmtDetailVal(v) {
+  if (v === true) return "✓";
+  if (v === false) return "✗";
+  if (typeof v === "object" && v !== null) return JSON.stringify(v);
+  return String(v);
+}
 
 const quote = quoteSymbol(props.card.symbol);
 
@@ -187,7 +248,7 @@ const levelText = computed(() =>
     : props.card.trigger_level === "C" ? "C级RSI" : "",
 );
 const confClass = computed(() =>
-  props.card.confidence >= 70 ? "high" : props.card.confidence >= 50 ? "mid" : "low",
+  props.card.confidence >= 60 ? "high" : props.card.confidence >= 50 ? "mid" : "low",
 );
 
 // 一键执行：仅有效且未执行过的信号可点（dry_run 下为纸面模拟）
@@ -314,6 +375,33 @@ function okClass(v) {
 }
 .level-item.ok { background: rgba(52, 199, 89, 0.12); color: #34c759; }
 .level-item.bad { background: rgba(255, 69, 58, 0.12); color: #ff453a; }
+.level-detail-link {
+  font-size: 11px; padding: 1px 6px; border-radius: 4px; cursor: pointer;
+  background: rgba(255, 159, 28, 0.10); color: #ff9f1c;
+  display: inline-flex; align-items: center; gap: 2px;
+}
+
+/* 评分明细 / 关卡详情弹窗 */
+.detail-popup { max-height: 70vh; overflow-y: auto; padding: 14px 16px 24px; }
+.detail-head {
+  font-size: 15px; font-weight: 700; margin-bottom: 10px;
+  display: flex; align-items: baseline; gap: 8px;
+}
+.detail-head .pass-line { font-size: 11px; color: #ff9f1c; font-weight: 400; }
+.score-group { margin-bottom: 12px; }
+.score-cat {
+  font-size: 12px; font-weight: 700; color: #ff9f1c;
+  margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px solid #2c2c2e;
+}
+.score-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; padding: 4px 0;
+}
+.score-name { flex: 0 0 118px; color: #e8e8ea; }
+.score-note { flex: 1; color: #8e8e93; font-size: 11px; text-align: right; }
+.score-val { flex: 0 0 52px; text-align: right; color: #34c759; font-weight: 700; }
+.score-val.miss { color: #ff9f1c; }
+.detail-empty { text-align: center; color: #8e8e93; font-size: 12px; padding: 20px 0; }
 
 /* 行5 实时行情 */
 .live {

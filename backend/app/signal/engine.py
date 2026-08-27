@@ -21,7 +21,7 @@ from ..indicators.engine import (
     nearest_zone_distance,
     volatility_coef,
 )
-from .scorer import score_signal
+from .scorer import score_breakdown, score_signal
 
 # 15 分钟周期毫秒数（K 线收盘判定）
 _BAR_MS = 15 * 60 * 1000
@@ -39,6 +39,8 @@ class SignalCard:
     funding: dict
     execution: dict
     reason: str
+    levels_detail: dict = field(default_factory=dict)   # 关卡判定数值（前端"查看满足条件"弹窗）
+    score_detail: list = field(default_factory=list)     # 评分项明细 [{cat,name,score,max,note}]
     created_at: int = field(default_factory=lambda: int(time.time() * 1000))
     expires_at: int = 0
     status: str = "pending_confirm"  # pending_confirm/confirmed/expired/stopped_out
@@ -62,6 +64,8 @@ class SignalCard:
             "direction": self.direction,
             "confidence": self.confidence,
             "levels": self.levels,
+            "levels_detail": self.levels_detail,
+            "score_detail": self.score_detail,
             "trigger_level": self.trigger_level,
             "funding": self.funding,
             "execution": self.execution,
@@ -111,7 +115,7 @@ class SignalEngine:
         if trigger_level is None:
             self.rejections[symbol] = "扳机未触发（需 5m MACD 柱同向确认）"
             return None
-        if trigger_level == "C":
+        if trigger_level == "C" and not config.TRIGGER_C_LEVEL_ALLOW:
             self.rejections[symbol] = "仅 C 级扳机（RSI 穿越无量能），只观察"
             return None
 
@@ -143,13 +147,14 @@ class SignalEngine:
 
         # ---------- 打分 ----------
         next_evt = _next_event_mins()
-        confidence = score_signal(
+        breakdown = score_breakdown(
             market_env, s4h, s1h, s15m, trigger_level, funding_tier, risk["liq_dist_atr"],
             direction=direction, risk_reward=risk.get("risk_reward"),
             macd_streak=s5m.get("macd_hist_streak"),
             volume_ratio=s15m.get("volume_ratio"), oi_change=oi_change,
             next_event_mins=next_evt,
         )
+        confidence = breakdown["total"]
         if confidence < config.SCORE_PASS:
             self.rejections[symbol] = f"置信度不足（{confidence} 分 < {config.SCORE_PASS}）"
             return None
@@ -163,12 +168,43 @@ class SignalEngine:
             "candle_check": candle_state,
             "macro_silence": True,
         }
+        # 关卡详情（前端"查看满足条件"弹窗）：每个关卡的关键判定数值
+        levels_detail = {
+            "市场环境": {"环境": env, "涨跌家数比": round(market_env.get("breadth", 0), 3)},
+            "方向门": {
+                "ADX": round(s4h.get("adx") or 0, 1),
+                "4h 收盘>EMA55": bool(s4h.get("above_ema55")),
+                "4h MACD 零轴上": bool(s4h.get("macd_above_zero")),
+                "1h EMA7>EMA21": bool(s1h.get("ema7_above_21")),
+            },
+            "扳机": {
+                "级别": {"A": "A级回踩", "B": "B级突破", "C": "C级RSI穿越"}.get(trigger_level, trigger_level),
+                "RSI": round(s15m.get("rsi") or 0, 1),
+                "量比": round(s15m.get("volume_ratio") or 0, 2),
+                "5m MACD柱连续": int(s5m.get("macd_hist_streak") or 0),
+            },
+            "量能": {
+                "量比": round(s15m.get("volume_ratio") or 0, 2),
+                "OI变化率": f"{round((oi_change or 0) * 100, 2)}%",
+            },
+            "风控": {
+                "盈亏比": round(risk.get("risk_reward") or 0, 2),
+                "止损距离": f"{round(risk.get('stop_dist') or 0, 4)} (≈{round((risk.get('stop_dist') or 0) / max(s15m.get('atr') or 1e-9, 1e-9), 2)}×ATR)",
+                "强平价距离": f"{round(risk.get('liq_dist_atr') or 0, 1)}×ATR",
+                "费率档": funding_tier.get("tier", "unknown"),
+            },
+            "K线形态": {"状态": candle_state, "实体": round(s15m.get("body") or 0, 4),
+                        "影线": round(s15m.get("shadow") or 0, 4)},
+            "宏观": {"静默窗口": "通过（无事件窗口内）"},
+        }
         reason = self._build_reason(direction, trigger_level, s15m, risk, funding_tier, candle_state)
         card = SignalCard(
             symbol=symbol,
             direction=direction,
             confidence=confidence,
             levels=levels,
+            levels_detail=levels_detail,
+            score_detail=breakdown["items"],
             trigger_level=trigger_level,
             funding=funding_tier,
             execution=execution,

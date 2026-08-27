@@ -39,13 +39,16 @@ VOL_MA_PERIODS = (7, 21)           # 均量线
 VOL_MA_WINDOW = 14                 # 量比/缩量/放量基准窗口（原 20 均量口径统一改 14）
 ADX_PERIOD = 14
 ADX_TREND_TH = 30                  # ADX>30 才开方向门（实验收紧：20→30；设置页可调，可回退）
-SCORE_PASS = 70                    # 信号置信度通过线（打分表：总分 70 通过）
+SCORE_PASS = 60                    # 信号置信度通过线（原 70 收紧后信号过少，下调 60 观察；可再调）
 CANDLE_EXCEPTION_ATR_MULT = 2.0    # 旱地拔葱：单根 K 线实体涨幅 > 2×ATR
 CANDLE_EXCEPTION_WICK_RATIO = 0.2  # 旱地拔葱：收盘贴近极值——影线 < 0.2×实体（多头看上影/空头看下影）
 SWING_WINDOW = 5                   # 价格结构枢轴窗口（HH/HL 识别）
 # 扳机动量确认放宽（N0.1）：5m MACD 柱同号连续根数 ≤ 该值视为有效
 # 1 = 仅"刚翻色"（原逻辑，最严）；3 = 翻色后 3 根内延续（默认）；5 = 激进
 TRIGGER_MOMENTUM_BARS = 3
+# 【临时放开】C 级扳机（RSI 穿越 50 无量能，原"只观察"拦截）：
+# 为放出几个信号观察信号量，临时放行；观察完改回 False 收紧。
+TRIGGER_C_LEVEL_ALLOW = True
 
 # ---------- 策略一：EMA 趋势跟踪（N0.7，适合单边行情） ----------
 EMA_TREND_TIMEFRAMES = {"trend": "4h", "confirm": "1h", "entry": "15m"}  # 4h 方向 + 1h 中期确认 + 15m 入场
