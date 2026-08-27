@@ -208,7 +208,10 @@ class SignalEngine:
         if direction == "long":
             # A 级：回踩 15m EMA21 附近（±0.5×ATR）不破 + 缩量 + 启动
             near_ema = abs(s15m["last_low"] - s15m["ema21"]) <= 0.5 * atr15
-            shrink = s15m["volume_ratio"] is not None and s15m["volume_ratio"] < config.VOL_RATIO_LOW
+            shrink = (
+                s15m.get("volume") is not None and s15m.get("vol_ma20") is not None
+                and s15m["volume"] < s15m["vol_ma20"] * config.VOL_RATIO_LOW
+            )
             bounce = s15m["close"] > s15m["ema21"] and s15m["rsi"] > s15m["rsi_prev"]
             if near_ema and shrink and bounce:
                 return "A"
@@ -219,7 +222,10 @@ class SignalEngine:
                 return "B"
         else:
             near_ema = abs(s15m["last_high"] - s15m["ema21"]) <= 0.5 * atr15
-            shrink = s15m["volume_ratio"] is not None and s15m["volume_ratio"] < config.VOL_RATIO_LOW
+            shrink = (
+                s15m.get("volume") is not None and s15m.get("vol_ma20") is not None
+                and s15m["volume"] < s15m["vol_ma20"] * config.VOL_RATIO_LOW
+            )
             bounce = s15m["close"] < s15m["ema21"] and s15m["rsi"] < s15m["rsi_prev"]
             if near_ema and shrink and bounce:
                 return "A"

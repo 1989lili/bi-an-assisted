@@ -139,6 +139,7 @@ def volume_metrics(df: pd.DataFrame, ma_periods: tuple[int, int] = (7, 21)) -> d
     return {
         "volume": float(vol.iloc[-1]),
         "vol_ma7": float(ma7),
+        "vol_ma20": float(vol.tail(20).mean()),
         "vol_ma21": float(ma21),
         "volume_ratio": float(vol.iloc[-1] / ma7) if ma7 else None,
     }
