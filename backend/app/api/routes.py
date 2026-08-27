@@ -217,17 +217,21 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
         if total > 0 and pnl_today < 0 and abs(pnl_today) / total >= config.BINANCE_DAILY_LOSS_LIMIT:
             raise HTTPException(status_code=429, detail="当日亏损已达熔断线，暂停新开仓")
         free = float(bal.get("free") or 0)
+        # 杠杆（确认页可选 1~5，默认3；不允许超 BINANCE_MAX_LEVERAGE）
+        lev = max(1, min(int(payload.leverage or config.BINANCE_DEFAULT_LEVERAGE), config.BINANCE_MAX_LEVERAGE))
         # 默认预算 = 总余额 × EXEC_DEFAULT_BUDGET_PCT（100% 全部余额）；用户确认页可传 budget_usdt 覆盖
         if payload.budget_usdt is not None and payload.budget_usdt > 0:
             budget = max(0.0, min(payload.budget_usdt, total))
         else:
             budget = total * config.EXEC_DEFAULT_BUDGET_PCT
-        budget = min(budget, free)  # 不能超过可用余额
+        budget = min(budget, free)  # 保证金不能超过可用余额
+        # 下单名义 = 保证金 × 杠杆（杠杆放大仓位；保证金占用 = 名义/杠杆 = 预算）
+        notional_budget = budget * lev
         # 70/30 拆分：市价 70% + 限价 30%（exec_plan.limit_price = 前阳 50% 回撤位）
         market_pct = int(exec_plan.get("market_pct") or config.EXEC_MARKET_PCT * 100) / 100
         # M5：按币种数量精度截断 + 最小下单量校验（高币价币种精度低，直接 round 会被币安拒单）
-        market_amount = executor.amount_to_precision(symbol, round(budget * market_pct / price, 8))
-        limit_amount = executor.amount_to_precision(symbol, round(budget * (1 - market_pct) / price, 8))
+        market_amount = executor.amount_to_precision(symbol, round(notional_budget * market_pct / price, 8))
+        limit_amount = executor.amount_to_precision(symbol, round(notional_budget * (1 - market_pct) / price, 8))
         # 限价腿名义不足币安最小名义（5U）时并入市价腿（否则限价单 -4164）
         if limit_amount > 0 and limit_amount * price < config.BINANCE_MIN_NOTIONAL:
             market_amount = executor.amount_to_precision(symbol, market_amount + limit_amount)
@@ -250,8 +254,6 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
         if not db.mark_signal_executed(signal_id):
             raise HTTPException(status_code=409, detail="信号已被占用或执行")
 
-        # 杠杆（确认页可选 1~5，默认3；不允许超 BINANCE_MAX_LEVERAGE）
-        lev = max(1, min(int(payload.leverage or config.BINANCE_DEFAULT_LEVERAGE), config.BINANCE_MAX_LEVERAGE))
         lev_res = executor.set_leverage(symbol, lev)
         if not lev_res.get("ok"):
             db.unmark_signal_executed(signal_id)
@@ -295,7 +297,9 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
             "position_id": pid, "side": side, "amount": amount,
             "order_id": market.get("id"), "price": price,
             "limit_order_id": limit_order.get("id") if limit_order else None,
-            "budget_usdt": budget, "position_factor": exec_plan.get("position_factor"),
+            "budget_usdt": budget, "leverage": lev,
+            "notional_usdt": round(amount * price, 2),
+            "position_factor": exec_plan.get("position_factor"),
             "mode": executor.mode_label,
         }
 

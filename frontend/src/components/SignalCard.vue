@@ -100,10 +100,8 @@
           <input v-model="execBudget" type="number" step="0.01" min="0" class="ed-input" />
         </div>
         <div class="ed-tip">
-          默认 = 全部余额
-          <template v-if="totalBalance">（当前 {{ totalBalance.toFixed(2) }} USDT）</template>
-          <template v-else>（余额获取中…可手动输入预算）</template>
-          ；可修改后确认
+          预算 = 保证金；名义 = 预算 × 杠杆（{{ execLeverage }}x），杠杆放大下单仓位
+          <template v-if="totalBalance">；默认 = 全部余额 {{ totalBalance.toFixed(2) }} USDT</template>
         </div>
       </div>
     </van-dialog>
