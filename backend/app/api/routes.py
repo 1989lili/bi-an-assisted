@@ -32,7 +32,7 @@ _SETTING_ALLOWLIST = frozenset({
     "BW_NARROW_FACTOR", "BW_WIDE_FACTOR",
     "ATR_COEF_NARROW", "ATR_COEF_NORMAL", "ATR_COEF_WIDE",
     "MIN_RISK_REWARD", "RISK_PER_TRADE",
-    "EXEC_MARKET_PCT", "EXEC_LIMIT_PCT", "EXEC_LIMIT_TTL_BARS",
+    "EXEC_MARKET_PCT", "EXEC_LIMIT_PCT", "EXEC_LIMIT_TTL_BARS", "EXEC_DEFAULT_BUDGET_PCT",
     "SIGNAL_TTL_BARS", "SIGNAL_COOLDOWN_MINUTES",
     "SL_INIT_COEF", "BE_PROFIT_ATR", "TRAIL_PROFIT_ATR",
     "MACRO_SILENCE_MINUTES", "MACRO_SILENCE_STOP_ATR", "MACRO_SILENCE_REDUCE_PCT",
@@ -183,7 +183,7 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
     """一键执行信号：按信号卡执行计划下单（dry_run 下仅模拟）并创建本地持仓。
 
     幂等：进程内互斥锁 + executed 标记，防并发重复下单（单进程 uvicorn 下有效）。
-    budget_usdt: 确认页调整后的预算（缺省 = 总余额 × EXEC_DEFAULT_BUDGET_PCT = 50%）。
+    budget_usdt: 确认页调整后的预算（缺省 = 总余额 × EXEC_DEFAULT_BUDGET_PCT = 100%）。
     """
     with _execute_lock:
         sig = db.get_signal(signal_id)
@@ -217,7 +217,7 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
         if total > 0 and pnl_today < 0 and abs(pnl_today) / total >= config.BINANCE_DAILY_LOSS_LIMIT:
             raise HTTPException(status_code=429, detail="当日亏损已达熔断线，暂停新开仓")
         free = float(bal.get("free") or 0)
-        # 默认预算 = 总余额 × EXEC_DEFAULT_BUDGET_PCT（50%）；用户确认页可传 budget_usdt 覆盖
+        # 默认预算 = 总余额 × EXEC_DEFAULT_BUDGET_PCT（100% 全部余额）；用户确认页可传 budget_usdt 覆盖
         if payload.budget_usdt is not None and payload.budget_usdt > 0:
             budget = max(0.0, min(payload.budget_usdt, total))
         else:

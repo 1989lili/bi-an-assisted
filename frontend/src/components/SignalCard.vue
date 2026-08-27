@@ -100,8 +100,8 @@
           <input v-model="execBudget" type="number" step="0.01" min="0" class="ed-input" />
         </div>
         <div class="ed-tip">
-          默认 = 总余额 50%
-          <template v-if="totalBalance">（当前 {{ (totalBalance * 0.5).toFixed(2) }} USDT）</template>
+          默认 = 全部余额
+          <template v-if="totalBalance">（当前 {{ totalBalance.toFixed(2) }} USDT）</template>
           <template v-else>（余额获取中…可手动输入预算）</template>
           ；可修改后确认
         </div>
@@ -277,7 +277,7 @@ async function onExecute() {
     const acct = await api.account();
     if (acct.ok) {
       totalBalance.value = Number(acct.total) || 0;
-      execBudget.value = Math.floor(totalBalance.value * 0.5 * 100) / 100; // 默认 50%
+      execBudget.value = Math.floor(totalBalance.value * 100) / 100; // 默认 = 全部余额
     }
   } catch (e) {
     /* 余额获取失败不阻塞弹窗，用户可手动输入预算 */
