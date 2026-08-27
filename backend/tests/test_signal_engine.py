@@ -23,6 +23,7 @@ def _snap_dict(overrides: dict | None = None, tf: str = "15m") -> dict:
         "rsi": 55.0, "rsi_prev": 45.0, "rsi_cross_up_50": True,
         "atr": 1.0, "bw": 0.05, "bw_median": 0.05,
         "adx": 30.0, "structure": "uptrend",
+        "ema55_slope_pct": 0.1,
         "swing_highs": [103.0], "swing_lows": [97.0],
         "recent_high": 102.0, "recent_low": 97.5,
         "prev_high": 101.0, "prev_low": 98.5,
@@ -226,17 +227,40 @@ class TestScorer(unittest.TestCase):
         market_env = {"env": "bull", "breadth": 0.6}
         s4h = _snap_dict(tf="4h")
         s1h = _snap_dict(tf="1h")
-        s15m = _snap_dict(tf="15m")
-        score = score_signal(market_env, s4h, s1h, s15m, "A", {"tier": "normal"}, 2.5)
+        s15m = _snap_dict({"prev_close": 99.5}, tf="15m")  # 价涨 → OI 顺向
+        # 强多头合成：费率正常 + OI 顺向 + 无事件 + 波动适中 + 趋势全满 + A级 + MACD 刚启动
+        # + 盈亏比高 + 清算距离充裕 → 应 ≥70
+        score = score_signal(
+            market_env, s4h, s1h, s15m, "A", {"tier": "normal"}, 2.5,
+            direction="long", risk_reward=3.0, macd_streak=1,
+            volume_ratio=1.8, oi_change=0.02, next_event_mins=None,
+        )
         self.assertGreaterEqual(score, 70)
 
     def test_low_score_bear_setup(self):
         market_env = {"env": "bear", "breadth": 0.3}
+        s4h = _snap_dict({"adx": 15.0, "ema55_slope_pct": -0.3, "structure": "downtrend"}, tf="4h")
+        s1h = _snap_dict({"ema7_above_21": False}, tf="1h")
+        s15m = _snap_dict(tf="15m")
+        score = score_signal(
+            market_env, s4h, s1h, s15m, "C", {"tier": "danger"}, 0.5,
+            direction="long", risk_reward=1.5, macd_streak=4,
+            volume_ratio=1.0, oi_change=0.0, next_event_mins=30,
+        )
+        self.assertLess(score, 70)
+
+    def test_score_capped_at_100(self):
+        # 全部子项拉满：总分应封顶 100（含量能加分 8）
+        market_env = {"env": "bull", "breadth": 0.6}
         s4h = _snap_dict(tf="4h")
         s1h = _snap_dict(tf="1h")
-        s15m = _snap_dict(tf="15m")
-        score = score_signal(market_env, s4h, s1h, s15m, "C", {"tier": "danger"}, 0.5)
-        self.assertLess(score, 70)
+        s15m = _snap_dict({"prev_close": 99.5}, tf="15m")  # 价涨 → OI 顺向
+        score = score_signal(
+            market_env, s4h, s1h, s15m, "A", {"tier": "normal"}, 5.0,
+            direction="long", risk_reward=5.0, macd_streak=1,
+            volume_ratio=2.5, oi_change=0.05, next_event_mins=None,
+        )
+        self.assertEqual(score, 100)
 
 
 class TestEvaluateEndToEnd(unittest.TestCase):
@@ -255,7 +279,7 @@ class TestEvaluateEndToEnd(unittest.TestCase):
             self.assertTrue(self.engine.rejections["TEST/USDT:USDT"])
         else:
             self.assertEqual(card.direction, "long")
-            self.assertGreaterEqual(card.confidence, 50)
+            self.assertGreaterEqual(card.confidence, config.SCORE_PASS)
             self.assertIn("execution", card.to_dict())
             self.assertIn("stop_loss", card.execution)
             self.assertGreater(card.execution["risk_reward"], 0)
@@ -281,7 +305,7 @@ class TestEvaluateEndToEnd(unittest.TestCase):
                                     [], oi_change=0.02, zones=[])
         if card is not None:
             self.assertEqual(card.direction, "long")
-            self.assertGreaterEqual(card.confidence, 50)
+            self.assertGreaterEqual(card.confidence, config.SCORE_PASS)
         else:
             self.assertIn("TEST/USDT:USDT", self.engine.rejections)
             self.assertTrue(self.engine.rejections["TEST/USDT:USDT"])

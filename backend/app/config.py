@@ -39,6 +39,7 @@ VOL_MA_PERIODS = (7, 21)           # 均量线
 VOL_MA_WINDOW = 14                 # 量比/缩量/放量基准窗口（原 20 均量口径统一改 14）
 ADX_PERIOD = 14
 ADX_TREND_TH = 30                  # ADX>30 才开方向门（实验收紧：20→30；设置页可调，可回退）
+SCORE_PASS = 70                    # 信号置信度通过线（打分表：总分 70 通过）
 CANDLE_EXCEPTION_ATR_MULT = 2.0    # 旱地拔葱：单根 K 线实体涨幅 > 2×ATR
 CANDLE_EXCEPTION_WICK_RATIO = 0.2  # 旱地拔葱：收盘贴近极值——影线 < 0.2×实体（多头看上影/空头看下影）
 SWING_WINDOW = 5                   # 价格结构枢轴窗口（HH/HL 识别）

@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 from .. import config
@@ -141,12 +142,16 @@ class SignalEngine:
         execution = self._execution_plan(s15m, direction, risk, funding_tier)
 
         # ---------- 打分 ----------
+        next_evt = _next_event_mins()
         confidence = score_signal(
             market_env, s4h, s1h, s15m, trigger_level, funding_tier, risk["liq_dist_atr"],
+            direction=direction, risk_reward=risk.get("risk_reward"),
+            macd_streak=s5m.get("macd_hist_streak"),
             volume_ratio=s15m.get("volume_ratio"), oi_change=oi_change,
+            next_event_mins=next_evt,
         )
-        if confidence < 50:
-            self.rejections[symbol] = f"置信度不足（{confidence} 分）"
+        if confidence < config.SCORE_PASS:
+            self.rejections[symbol] = f"置信度不足（{confidence} 分 < {config.SCORE_PASS}）"
             return None
 
         levels = {
@@ -435,6 +440,18 @@ def _parse_iso_ms(iso: str) -> float:
 
     dt = datetime.fromisoformat(iso)
     return dt.timestamp()
+
+
+def _next_event_mins() -> float | None:
+    """最近宏观事件距现在的分钟数（无事件返回 None；供评分"无重大事件"子项）。"""
+    try:
+        from ..calendar import macro
+    except ImportError:  # pragma: no cover - 模块结构变动时兜底
+        return None
+    evt = macro.next_macro_event()
+    if not evt or not evt.get("event_time"):
+        return None
+    return (datetime.fromisoformat(evt["event_time"]).timestamp() - time.time()) / 60.0
 
 
 # ==================== 🔟 出场预警引擎 ====================

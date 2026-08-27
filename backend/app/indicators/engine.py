@@ -278,6 +278,10 @@ def compute_tf_snapshot(df: pd.DataFrame) -> Optional[dict]:
     adx_s = adx(df)
     k, d, j = kdj(df)
     ema7, ema21, ema55 = ema(close, 7), ema(close, 21), ema(close, 55)
+    # EMA55 斜率（当前 vs 4 根前，%变化；用于趋势强度评分）
+    ema55_slope_pct = 0.0
+    if len(ema55) >= 6 and ema55.iloc[-5] > 0:
+        ema55_slope_pct = float((ema55.iloc[-1] / ema55.iloc[-5] - 1) * 100)
     highs_idx, lows_idx = swing_points(df, config.SWING_WINDOW)
 
     vol = volume_metrics(df)
@@ -289,6 +293,7 @@ def compute_tf_snapshot(df: pd.DataFrame) -> Optional[dict]:
         "ema7": float(ema7.iloc[-1]),
         "ema21": float(ema21.iloc[-1]),
         "ema55": float(ema55.iloc[-1]),
+        "ema55_slope_pct": ema55_slope_pct,
         "above_ema55": bool(last > ema55.iloc[-1]),
         "ema7_above_21": bool(ema7.iloc[-1] > ema21.iloc[-1]),
         "macd_dif": float(dif.iloc[-1]),
