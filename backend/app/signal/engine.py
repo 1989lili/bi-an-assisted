@@ -212,7 +212,13 @@ class SignalEngine:
                 s15m.get("volume") is not None and s15m.get("vol_ma20") is not None
                 and s15m["volume"] < s15m["vol_ma20"] * config.VOL_RATIO_LOW
             )
-            bounce = s15m["close"] > s15m["ema21"] and s15m["rsi"] > s15m["rsi_prev"]
+            bounce = (
+                s15m["close"] > s15m["ema21"]
+                and (
+                    (s15m["rsi_prev"] < config.RSI_BOUNCE_CROSS <= s15m["rsi"])
+                    or (s15m["rsi_prev"] < config.RSI_OVERSOLD and s15m["rsi"] > s15m["rsi_prev"])
+                )
+            )
             if near_ema and shrink and bounce:
                 return "A"
             # B 级：放量突破前高
@@ -226,7 +232,13 @@ class SignalEngine:
                 s15m.get("volume") is not None and s15m.get("vol_ma20") is not None
                 and s15m["volume"] < s15m["vol_ma20"] * config.VOL_RATIO_LOW
             )
-            bounce = s15m["close"] < s15m["ema21"] and s15m["rsi"] < s15m["rsi_prev"]
+            bounce = (
+                s15m["close"] < s15m["ema21"]
+                and (
+                    (s15m["rsi_prev"] > (100 - config.RSI_BOUNCE_CROSS) >= s15m["rsi"])
+                    or (s15m["rsi_prev"] > (100 - config.RSI_OVERSOLD) and s15m["rsi"] < s15m["rsi_prev"])
+                )
+            )
             if near_ema and shrink and bounce:
                 return "A"
             breakdown = s15m["close"] < s15m["recent_low"]

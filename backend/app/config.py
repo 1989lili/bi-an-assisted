@@ -32,6 +32,7 @@ RSI_PERIOD = 14
 RSI_OVERSOLD = 30                  # 超卖区
 RSI_LOW_ZONE = 45                  # 低位区
 RSI_CROSS = 50                     # 扳机穿越线
+RSI_BOUNCE_CROSS = 40              # A级回踩 RSI 回升穿越线（多头 <40→≥40；空头 >60→≤60，超卖/超买拐头用 30/70）
 BOLL_PERIOD, BOLL_STD = 20, 2
 ATR_PERIOD = 14
 VOL_MA_PERIODS = (7, 21)           # 均量线
