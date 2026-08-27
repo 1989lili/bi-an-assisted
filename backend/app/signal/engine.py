@@ -24,8 +24,6 @@ from .scorer import score_signal
 
 # 15 分钟周期毫秒数（K 线收盘判定）
 _BAR_MS = 15 * 60 * 1000
-# K 线已运行超过 10 分钟（旱地拔葱例外条件）
-_EXCEPTION_ELAPSED_MS = 10 * 60 * 1000
 
 
 @dataclass
@@ -332,32 +330,42 @@ class SignalEngine:
     # ==================== 5️⃣ K线形态硬刹车 ====================
 
     def _candle_check(self, s15m: dict, s5m: dict, direction: str) -> Optional[str]:
-        """常规：15m 收盘后检查（收盘不破前低 + 实体>影线）。
-        例外（旱地拔葱）：当前 K 线运行 >10 分钟且突破前高 ≥1.5×ATR → 直接放行。
-        返回 'confirmed' / 'exception' / 'pending'；形态不满足返回 None。
+        """K线形态硬刹车。
+
+        常规（15m 已收盘）：收盘不破前低 + 实体≥影线 → 'confirmed'。
+        例外（旱地拔葱，新定义）：单根 15m K 线实体涨幅 > CANDLE_EXCEPTION_ATR_MULT×ATR
+        且收盘贴近极值（多头：上影线 < CANDLE_EXCEPTION_WICK_RATIO×实体；空头：下影线同理）
+        → 直接视为强突破信号（忽略实体/影线比例与收盘状态，不等待收盘）。
+        未收盘且不满足旱地拔葱 → 'pending'（等待收盘确认）；形态不满足 → None。
         """
         now_ms = int(time.time() * 1000)
         bar_elapsed = now_ms - s15m["last_ts"]
         closed = bar_elapsed >= _BAR_MS  # 最后一根 15m K 线已收盘
 
-        atr15 = s15m["atr"]
+        atr15 = s15m.get("atr") or 0.0
+        mult = config.CANDLE_EXCEPTION_ATR_MULT * atr15
+        wick_ratio = config.CANDLE_EXCEPTION_WICK_RATIO
+
         if direction == "long":
-            exceeded = s15m["close"] > s15m["recent_high"] + 1.5 * atr15
+            body = s15m["close"] - s15m["last_open"]
+            wick = s15m["last_high"] - max(s15m["last_open"], s15m["close"])
+            if atr15 > 0 and body > mult and wick < wick_ratio * body:
+                return "exception"  # 旱地拔葱：强突破，直接放行
+            if not closed:
+                return "pending"
             body_ok = s15m["body"] >= s15m["shadow"]
             prev_low_ok = s15m["close"] > s15m["prev_low"]
+            return "confirmed" if (body_ok and prev_low_ok) else None
         else:
-            exceeded = s15m["close"] < s15m["recent_low"] - 1.5 * atr15
+            body = s15m["last_open"] - s15m["close"]
+            wick = min(s15m["last_open"], s15m["close"]) - s15m["last_low"]
+            if atr15 > 0 and body > mult and wick < wick_ratio * body:
+                return "exception"  # 旱地拔葱：强突破，直接放行
+            if not closed:
+                return "pending"
             body_ok = s15m["body"] >= s15m["shadow"]
             prev_low_ok = s15m["close"] < s15m["prev_high"]
-
-        if not closed:
-            # 旱地拔葱例外：临近收盘（>10 分钟）+ 远超确认条件
-            if bar_elapsed > _EXCEPTION_ELAPSED_MS and exceeded:
-                return "exception"
-            return "pending"  # 等待 K 线收盘确认
-        if body_ok and prev_low_ok:
-            return "confirmed"
-        return None
+            return "confirmed" if (body_ok and prev_low_ok) else None
 
     # ==================== 6️⃣ 宏观静默期 ====================
 

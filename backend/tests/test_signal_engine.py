@@ -27,7 +27,7 @@ def _snap_dict(overrides: dict | None = None, tf: str = "15m") -> dict:
         "recent_high": 102.0, "recent_low": 97.5,
         "prev_high": 101.0, "prev_low": 98.5,
         "prev_open": 99.0, "prev_close": 100.5,
-        "last_high": 100.6, "last_low": 99.4,
+        "last_high": 100.6, "last_low": 99.4, "last_open": 100.0,
         "body": 0.6, "shadow": 0.3,
         "volume": 500.0, "vol_ma7": 400.0, "vol_ma21": 450.0, "volume_ratio": 1.6,
         "last_ts": int(time.time() * 1000) - _BAR_MS * 2,  # 已收盘
@@ -195,13 +195,30 @@ class TestCandleCheck(unittest.TestCase):
         })
         self.assertEqual(self.engine._candle_check(s15m, {}, "long"), "pending")
 
-    def test_exception_breakout(self):
-        # 旱地拔葱：未收盘但突破 1.5×ATR
+    def test_exception_strong_single_bar_long(self):
+        # 旱地拔葱（新定义）：单根 15m 实体涨幅 4.0 > 2×ATR(2.0)，上影 0.5 < 0.2×4 → 未收盘也直接放行
         s15m = _snap_dict({
-            "last_ts": int(time.time() * 1000) - 11 * 60 * 1000,
-            "close": 104.0, "recent_high": 102.0, "atr": 1.0,  # 突破 2.0 > 1.5
+            "last_ts": int(time.time() * 1000) - 5 * 60 * 1000,  # 未收盘
+            "last_open": 100.0, "close": 104.0, "last_high": 104.5, "atr": 1.0,
         })
         self.assertEqual(self.engine._candle_check(s15m, {}, "long"), "exception")
+
+    def test_exception_strong_single_bar_short(self):
+        # 旱地拔葱（空头）：实体 4.0 > 2×ATR，下影 0.5 < 0.2×4 → 直接放行
+        s15m = _snap_dict({
+            "last_ts": int(time.time() * 1000) - 5 * 60 * 1000,
+            "last_open": 104.0, "close": 100.0, "last_low": 99.5, "atr": 1.0,
+        })
+        self.assertEqual(self.engine._candle_check(s15m, {}, "short"), "exception")
+
+    def test_no_exception_when_wick_long(self):
+        # 上影过长（1.5 ≥ 0.2×4=0.8）：不满足旱地拔葱；已收盘且常规形态也不合格（影线>实体）→ None
+        s15m = _snap_dict({
+            "last_ts": int(time.time() * 1000) - _BAR_MS * 2,  # 已收盘
+            "last_open": 100.0, "close": 104.0, "last_high": 105.5, "atr": 1.0,
+            "body": 0.4, "shadow": 2.0,
+        })
+        self.assertIsNone(self.engine._candle_check(s15m, {}, "long"))
 
 
 class TestScorer(unittest.TestCase):

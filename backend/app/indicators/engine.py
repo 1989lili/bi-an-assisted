@@ -315,6 +315,7 @@ def compute_tf_snapshot(df: pd.DataFrame) -> Optional[dict]:
         "prev_close": float(df["close"].iloc[-2]),
         "last_high": float(df["high"].iloc[-1]),
         "last_low": float(df["low"].iloc[-1]),
+        "last_open": float(df["open"].iloc[-1]),
         "body": abs(float(df["close"].iloc[-1] - df["open"].iloc[-1])),
         "shadow": float(df["high"].iloc[-1] - df["low"].iloc[-1]) - abs(float(df["close"].iloc[-1] - df["open"].iloc[-1])),
         **vol,
