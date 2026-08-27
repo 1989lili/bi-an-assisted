@@ -67,15 +67,12 @@
       </div>
     </div>
 
-    <!-- 信号列表：有效置顶，已离场/过期沉底分组展示 -->
+    <!-- 信号列表：仅显示有效信号（离场/过期自动隐藏） -->
     <van-empty v-if="!loading && signals.length === 0" description="暂无信号（引擎持续监控中，触发后实时推送）" />
     <div v-for="card in activeSignals" :key="card.id" class="signal-item" :class="{ fresh: card.id === newestId }">
       <SignalCard :card="card" />
     </div>
-    <div v-if="deadSignals.length" class="sig-sep">历史信号（{{ deadSignals.length }}，已离场/过期）</div>
-    <div v-for="card in deadSignals" :key="card.id" class="signal-item">
-      <SignalCard :card="card" />
-    </div>
+    <van-empty v-if="!loading && signals.length > 0 && activeSignals.length === 0" description="当前无有效信号（已离场/过期信号已隐藏）" />
   </div>
 </template>
 
@@ -121,7 +118,6 @@ const activeSignals = computed(() => {
   }
   return [...seen.values()];
 });
-const deadSignals = computed(() => signals.value.filter((s) => sigRank(s) === 2));
 const rejectionList = computed(() =>
   Object.entries(rejections.value)
     .map(([symbol, reason]) => ({ symbol, reason }))
@@ -265,11 +261,6 @@ onUnmounted(() => clearInterval(timer));
 .rej-reason { color: #8e8e93; }
 .rej-empty { font-size: 12px; color: #8e8e93; text-align: center; padding: 8px 0; }
 .signal-item.fresh { animation: flash 0.5s ease; }
-.sig-sep {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: #8e8e93; margin: 12px 0 8px;
-}
-.sig-sep::before, .sig-sep::after { content: ""; flex: 1; height: 1px; background: #2c2c2e; }
 @keyframes flash {
   0% { transform: scale(1.02); box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.6); }
   100% { transform: scale(1); box-shadow: none; }
