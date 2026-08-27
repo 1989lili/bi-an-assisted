@@ -46,9 +46,8 @@ SWING_WINDOW = 5                   # 价格结构枢轴窗口（HH/HL 识别）
 # 扳机动量确认放宽（N0.1）：5m MACD 柱同号连续根数 ≤ 该值视为有效
 # 1 = 仅"刚翻色"（原逻辑，最严）；3 = 翻色后 3 根内延续（默认）；5 = 激进
 TRIGGER_MOMENTUM_BARS = 3
-# 【临时放开】C 级扳机（RSI 穿越 50 无量能，原"只观察"拦截）：
-# 为放出几个信号观察信号量，临时放行；观察完改回 False 收紧。
-TRIGGER_C_LEVEL_ALLOW = True
+# C 级扳机（RSI 穿越 50 无量能，原"只观察"）：观察期已结束，关闭收紧（设置页可临时放开）
+TRIGGER_C_LEVEL_ALLOW = False
 
 # ---------- 策略一：EMA 趋势跟踪（N0.7，适合单边行情） ----------
 EMA_TREND_TIMEFRAMES = {"trend": "4h", "confirm": "1h", "entry": "15m"}  # 4h 方向 + 1h 中期确认 + 15m 入场
