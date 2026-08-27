@@ -1,14 +1,16 @@
-"""策略一：EMA 趋势跟踪（适合单边行情，N0.7，V2 收紧）。
+"""策略一：EMA 趋势跟踪（适合单边行情，N0.7，V3 收紧）。
 
-- 周期对可配置（`config.EMA_TREND_TIMEFRAMES`，默认 4h 趋势 + 15m 入场）。
-- **收紧入场（要"真实机会"才出信号）**：
-  - 趋势周期（4h）：价格 > EMA200 **且 EMA200 明确向上/向下**（斜率>0，非走平）；斜率越强越好。
-  - 入场周期（15m）：EMA20>EMA50 排列 + 金叉/**健康回踩**（触及 EMA20、从未破 EMA50、收盘站回 EMA20 上方）
-    + RSI 落顺势力区（多 50~68 / 空 32~50，不追超买超卖）+ 放量（>20 均量×1.5）
-    + **不追远离**（现价距 EMA20 ≤ 2×ATR）+ 收盘确认。
-- 空头为多头镜像对称。
-- **真实置信度评分**（55~95）：金叉/死叉、RSI 顺势度、放量倍数、EMA200 斜率、EMA20/50 分离度加权。
-- 出场（三层，收盘价判定）：吊灯 3×ATR / EMA50 破位 / 时间止损（48 根）。
+- 周期：4h 方向（EMA200 + 斜率阈值）→ 1h 中期确认（EMA20/50 排列）→ 15m 入场。
+- **收紧入场（真实机会才出）**：
+  - 4h：价格 > EMA200 且 EMA200 斜率 > `EMA_TREND_MIN_SLOPE_PCT`（排除伪趋势）
+  - 1h：EMA20 > EMA50（中期共振，补中间周期）
+  - 15m：EMA20>EMA50 + 金叉/健康回踩（触及 EMA20、未破 EMA50、站回）
+    + **收盘突破前 20 根高点（真突破确认）**
+    + RSI 多头 50~68 / 空头 32~50（顺势区，修漏洞）
+    + 放量（>20 均量 × 2.0）+ 不追远（距 EMA20 ≤ 2×ATR）+ 收盘确认
+- 空头镜像对称。
+- 真实置信度评分（55~95）。
+- 出场（三层）：吊灯 3×ATR / EMA50 破位 / 时间止损 48 根；第一目标 2.5×止损距离。
 """
 from __future__ import annotations
 
@@ -21,8 +23,10 @@ from ..indicators.engine import atr, ema, rsi
 
 _TREND_MIN_BARS = 220
 _ENTRY_MIN_BARS = 60
+_CONFIRM_MIN_BARS = 60
 _VOL_WINDOW = 20
 _SLOPE_LOOKBACK = 4  # EMA200 斜率：对比 N 根前
+_BREAKOUT_LOOKBACK = 20  # 突破确认：前 N 根高点/低点
 
 
 def _cross_up(fast: pd.Series, slow: pd.Series) -> bool:
@@ -34,11 +38,7 @@ def _cross_down(fast: pd.Series, slow: pd.Series) -> bool:
 
 
 def _retrace_reclaim(df: pd.DataFrame, fast: pd.Series, slow: pd.Series, direction: str) -> bool:
-    """健康回踩：近 N 根内曾触及 EMA20（fast），但未跌破 EMA50（slow），且当前收盘重新站上/跌破 fast。
-
-    多头：回踩到 EMA20 附近但始终未破 EMA50（支撑仍在），收盘站上 EMA20；
-    空头：反抽到 EMA20 附近但始终未上破 EMA50，收盘重新跌破 EMA20。
-    """
+    """健康回踩：近 N 根内曾触及 EMA20（fast），但未跌破 EMA50（slow），且当前收盘重新站上/跌破 fast。"""
     lb = config.EMA_TREND_RETRACE_LOOKBACK
     seg = df.iloc[-lb - 1:-1]
     seg_fast = fast.iloc[-lb - 1:-1]
@@ -56,31 +56,30 @@ def _retrace_reclaim(df: pd.DataFrame, fast: pd.Series, slow: pd.Series, directi
 
 def _score_signal(rsi_v: float, vol_ratio: float, slope_pct: float,
                   cross: bool, sep_pct: float, direction: str) -> int:
-    """真实置信度评分（55~95）。分数越高代表趋势/量能/动量越强。"""
+    """真实置信度评分（55~95）。"""
     s = 55
-    # 触发类型：金叉/死叉 强于 回踩/反抽
     s += 12 if cross else 6
-    # RSI 顺势度：离开 55(多)/45(空) 越远越弱
     center = 55 if direction == "long" else 45
     s += max(0, int(8 - abs(rsi_v - center) * 0.6))
-    # 放量倍数（>1.5 加分）
     if vol_ratio > 1.5:
         s += min(10, int((vol_ratio - 1.5) * 8))
-    # EMA200 斜率（%）
     s += min(10, int(abs(slope_pct) * 400))
-    # EMA20/50 分离度（%）
     s += min(8, int(sep_pct * 300))
     return int(min(95, max(55, s)))
 
 
 def evaluate(klines: dict[str, pd.DataFrame]) -> Optional[dict]:
-    """策略一入场评估（收紧）。返回 {'direction','confidence','reason','atr','vol_ratio'} 或 None。"""
+    """策略一入场评估（V3 收紧）。klines 须含 trend/confirm/entry 三周期。"""
     trend_key = config.EMA_TREND_TIMEFRAMES["trend"]
+    confirm_key = config.EMA_TREND_TIMEFRAMES.get("confirm")
     entry_key = config.EMA_TREND_TIMEFRAMES["entry"]
     tdf = klines.get(trend_key)
     edf = klines.get(entry_key)
+    cdf = klines.get(confirm_key) if confirm_key else None
     if tdf is None or edf is None or len(tdf) < _TREND_MIN_BARS or len(edf) < _ENTRY_MIN_BARS:
         return None
+    if cdf is None or len(cdf) < _CONFIRM_MIN_BARS:
+        return None  # 中期确认数据缺失 → 不评估（从严）
 
     # ---- 趋势周期：EMA200 长期方向 + 明确斜率 ----
     tclose = tdf["close"]
@@ -88,6 +87,12 @@ def evaluate(klines: dict[str, pd.DataFrame]) -> Optional[dict]:
     above = float(tclose.iloc[-1]) > float(ema_long.iloc[-1])
     slope_pct = (float(ema_long.iloc[-1]) - float(ema_long.iloc[-_SLOPE_LOOKBACK])) \
         / float(ema_long.iloc[-_SLOPE_LOOKBACK]) * 100
+
+    # ---- 中期确认（1h）：EMA20/EMA50 排列 ----
+    cfast = ema(cdf["close"], config.EMA_TREND_FAST)
+    cmid = ema(cdf["close"], config.EMA_TREND_MID)
+    c_ok_long = float(cfast.iloc[-1]) > float(cmid.iloc[-1])
+    c_ok_short = float(cfast.iloc[-1]) < float(cmid.iloc[-1])
 
     # ---- 入场周期 ----
     eclose = edf["close"]
@@ -100,14 +105,18 @@ def evaluate(klines: dict[str, pd.DataFrame]) -> Optional[dict]:
     atr_v = float(atr(edf).iloc[-1])
     near_ema = abs(float(eclose.iloc[-1]) - float(efast.iloc[-1])) <= config.EMA_TREND_ENTRY_NEAR_ATR * atr_v
     sep_pct = abs(float(efast.iloc[-1]) - float(emid.iloc[-1])) / float(emid.iloc[-1]) * 100
+    last_close = float(eclose.iloc[-1])
+    prev_high = float(edf["high"].iloc[-_BREAKOUT_LOOKBACK - 1:-1].max())  # 突破确认前高
+    prev_low = float(edf["low"].iloc[-_BREAKOUT_LOOKBACK - 1:-1].min())
 
-    # ---- 多头（收紧：方向向上 + 趋势斜率 + 排列 + RSI 顺势 + 放量 + 不追远） ----
-    if (above and slope_pct > 0 and float(efast.iloc[-1]) > float(emid.iloc[-1])
+    # ---- 多头（4h方向+斜率阈值 + 1h中期 + 排列 + RSI 50~68 + 放量2.0 + 不追远 + 突破前高） ----
+    if (above and slope_pct > config.EMA_TREND_MIN_SLOPE_PCT and c_ok_long
+            and float(efast.iloc[-1]) > float(emid.iloc[-1])
             and config.EMA_TREND_RSI_MIN < rsi_v <= config.EMA_TREND_RSI_MAX
             and vol_ratio > config.EMA_TREND_VOL_MULT and near_ema):
         cross = _cross_up(efast, emid)
         reclaim = _retrace_reclaim(edf, efast, emid, "long")
-        if cross or reclaim:
+        if (cross or reclaim) and last_close > prev_high:
             conf = _score_signal(rsi_v, vol_ratio, slope_pct, cross, sep_pct, "long")
             return {
                 "direction": "long", "confidence": conf,
@@ -116,12 +125,13 @@ def evaluate(klines: dict[str, pd.DataFrame]) -> Optional[dict]:
             }
 
     # ---- 空头（对称镜像） ----
-    if (not above and slope_pct < 0 and float(efast.iloc[-1]) < float(emid.iloc[-1])
-            and config.EMA_TREND_RSI_MIN <= rsi_v < 50
+    if (not above and slope_pct < -config.EMA_TREND_MIN_SLOPE_PCT and c_ok_short
+            and float(efast.iloc[-1]) < float(emid.iloc[-1])
+            and config.EMA_TREND_RSI_SHORT_MIN <= rsi_v < 50
             and vol_ratio > config.EMA_TREND_VOL_MULT and near_ema):
         cross = _cross_down(efast, emid)
         breakdown = _retrace_reclaim(edf, efast, emid, "short")
-        if cross or breakdown:
+        if (cross or breakdown) and last_close < prev_low:
             conf = _score_signal(rsi_v, vol_ratio, slope_pct, cross, sep_pct, "short")
             return {
                 "direction": "short", "confidence": conf,

@@ -135,7 +135,12 @@ class DeepScanner:
             if trend_df is None or len(trend_df) < 220:
                 return None
 
-        res = ema_eval({trend_key: trend_df, entry_key: entry_df})
+        # 传入三周期（trend/confirm/entry）：策略一 V3 需要 1h 中期确认
+        feed = {trend_key: trend_df, entry_key: entry_df}
+        confirm_key = config.EMA_TREND_TIMEFRAMES.get("confirm")
+        if confirm_key and klines.get(confirm_key) is not None:
+            feed[confirm_key] = klines[confirm_key]
+        res = ema_eval(feed)
         if res is None:
             return None
         if not self._should_emit(symbol, res["direction"], "ema_trend"):
