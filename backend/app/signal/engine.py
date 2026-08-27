@@ -210,8 +210,8 @@ class SignalEngine:
             # A 级：回踩 15m EMA21 附近（±0.5×ATR）不破 + 缩量 + 启动
             near_ema = abs(s15m["last_low"] - s15m["ema21"]) <= 0.5 * atr15
             shrink = (
-                s15m.get("volume") is not None and s15m.get("vol_ma20") is not None
-                and s15m["volume"] < s15m["vol_ma20"] * config.VOL_RATIO_LOW
+                s15m.get("volume") is not None and s15m.get("vol_ma14") is not None
+                and s15m["volume"] < s15m["vol_ma14"] * config.VOL_RATIO_LOW
             )
             bounce = (
                 s15m["close"] > s15m["ema21"]
@@ -230,8 +230,8 @@ class SignalEngine:
         else:
             near_ema = abs(s15m["last_high"] - s15m["ema21"]) <= 0.5 * atr15
             shrink = (
-                s15m.get("volume") is not None and s15m.get("vol_ma20") is not None
-                and s15m["volume"] < s15m["vol_ma20"] * config.VOL_RATIO_LOW
+                s15m.get("volume") is not None and s15m.get("vol_ma14") is not None
+                and s15m["volume"] < s15m["vol_ma14"] * config.VOL_RATIO_LOW
             )
             bounce = (
                 s15m["close"] < s15m["ema21"]

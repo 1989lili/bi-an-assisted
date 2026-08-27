@@ -13,12 +13,16 @@ from app.signal.engine import SignalCard
 from app.signal.monitor import SignalMonitor
 from app.store import db
 
-_TMP_DIR = Path(tempfile.mkdtemp(prefix="bi_monitor_test_"))
+_TMP_DIR = Path(__file__).resolve().parent / "_test_tmp"
+_TMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def setUpModule() -> None:
+    _db = _TMP_DIR / "monitor.db"
+    if _db.exists():
+        _db.unlink()
     config.DATA_DIR = _TMP_DIR
-    config.DB_PATH = _TMP_DIR / "test.db"
+    config.DB_PATH = _TMP_DIR / "monitor.db"
     db.init_db()
 
 

@@ -24,7 +24,7 @@ from ..indicators.engine import atr, ema, rsi
 _TREND_MIN_BARS = 220
 _ENTRY_MIN_BARS = 60
 _CONFIRM_MIN_BARS = 60
-_VOL_WINDOW = 20
+_VOL_WINDOW = config.VOL_MA_WINDOW  # 放量基准均量窗口（与套1 量比口径统一）
 _SLOPE_LOOKBACK = 4  # EMA200 斜率：对比 N 根前
 _BREAKOUT_LOOKBACK = 20  # 突破确认：前 N 根高点/低点
 

@@ -14,3 +14,6 @@ data/
 # IDE
 .idea/
 .vscode/
+
+# 测试临时目录（沙箱下 sqlite 工作区落盘）
+backend/tests/_test_tmp/

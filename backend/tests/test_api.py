@@ -12,7 +12,8 @@ from app import config
 from app.api.routes import router
 from app.store import db
 
-_TMP_DIR = Path(tempfile.mkdtemp(prefix="bi_test_"))
+_TMP_DIR = Path(__file__).resolve().parent / "_test_tmp"
+_TMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _make_app() -> FastAPI:
@@ -55,12 +56,28 @@ def _make_app() -> FastAPI:
             )
 
     app.state.fetcher = FakeFetcher()
+
+    class FakeExecutor:
+        """手动平仓路由用的假执行器（真单链路在 integration 层验证）。"""
+
+        configured = True
+
+        def cancel_order(self, symbol, order_id):
+            return {"ok": True}
+
+        def create_order(self, *a, **k):
+            return {"ok": True, "dry_run": True, "id": "fake_order"}
+
+    app.state.executor = FakeExecutor()
     return app
 
 
 def setUpModule() -> None:
+    _db = _TMP_DIR / "api.db"
+    if _db.exists():
+        _db.unlink()
     config.DATA_DIR = _TMP_DIR
-    config.DB_PATH = _TMP_DIR / "test.db"
+    config.DB_PATH = _TMP_DIR / "api.db"
     db.init_db()
 
 
@@ -178,9 +195,9 @@ class TestSettings(TestApiBase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("COARSE_INTERVAL_SEC", r.json())
 
-        r = self.client.put("/api/settings/COARSE_INTERVAL_SEC", json={"value": 90})
+        r = self.client.put("/api/settings/ADX_TREND_TH", json={"value": 25})
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(config.COARSE_INTERVAL_SEC, 90)
+        self.assertEqual(config.ADX_TREND_TH, 25)
 
         r = self.client.put("/api/settings/nonexistent_key", json={"value": 1})
         self.assertEqual(r.status_code, 400)

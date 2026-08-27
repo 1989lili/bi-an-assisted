@@ -132,17 +132,17 @@ def structure_label(lows: list[int], highs: list[int], close_series: pd.Series) 
 
 
 def volume_metrics(df: pd.DataFrame, ma_periods: tuple[int, int] = (7, 21)) -> dict:
-    """VOL 均量 + 量比。量比 = 当前量 ÷ MA7。"""
+    """VOL 均量 + 量比。量比 = 当前量 ÷ VOL_MA_WINDOW(14) 周期均量（标准口径）。"""
     vol = df["volume"]
     ma7 = vol.tail(ma_periods[0]).mean()
-    ma20 = vol.tail(20).mean()
+    ma14 = vol.tail(config.VOL_MA_WINDOW).mean()
     ma21 = vol.tail(ma_periods[1]).mean()
     return {
         "volume": float(vol.iloc[-1]),
         "vol_ma7": float(ma7),
-        "vol_ma20": float(ma20),
+        "vol_ma14": float(ma14),
         "vol_ma21": float(ma21),
-        "volume_ratio": float(vol.iloc[-1] / ma20) if ma20 else None,  # 量比 = 当前VOL ÷ 20周期均量（标准口径）
+        "volume_ratio": float(vol.iloc[-1] / ma14) if ma14 else None,  # 量比 = 当前VOL ÷ 14周期均量
     }
 
 

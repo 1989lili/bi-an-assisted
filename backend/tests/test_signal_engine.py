@@ -4,6 +4,7 @@ from __future__ import annotations
 import time
 import unittest
 
+from app import config
 from app.indicators.engine import compute_indicator_snapshot
 from app.signal.engine import SignalEngine, evaluate_exit
 from app.signal.scorer import score_signal
@@ -81,7 +82,8 @@ class TestTrigger(unittest.TestCase):
         s15m = _snap_dict({
             "last_low": 99.2, "ema21": 99.0, "atr": 1.0,  # 低点贴近 EMA21（±0.5×ATR）
             "volume_ratio": 0.5,                          # 缩量
-            "close": 100.0, "rsi": 52.0, "rsi_prev": 48.0,
+            "volume": 500.0, "vol_ma14": 1000.0,          # 缩量：500 < 1000×0.7
+            "close": 100.0, "rsi": 45.0, "rsi_prev": 38.0,  # RSI 回升：38 < 40 ≤ 45
         })
         s5m = _snap_dict({"macd_hist": 0.2, "macd_hist_prev": -0.1}, tf="5m")
         self.assertEqual(self.engine._trigger(s15m, s5m, "long"), "A")
@@ -145,11 +147,16 @@ class TestRiskBrake(unittest.TestCase):
         self.assertIsNone(risk)
 
     def test_block_near_liquidation_zone(self):
+        from unittest import mock
+
         s15m = _snap_dict({"close": 100.0, "atr": 1.0, "bw": 0.05, "bw_median": 0.05})
         s1h = _snap_dict({"swing_highs": [105.0]}, tf="1h")
-        # 密集区上沿 99.0 → 距现价 1.0 < 止损距离 1.5 → 拦截
-        risk = self.engine._risk_brake(s15m, s1h, "long", {"tier": "normal", "position_factor": 1.0},
-                                       [(97.0, 99.0)])
+        # 真实预估强平价（逐仓）：现价 100，杠杆 3 → 强平价 67.17，距离 32.83 远超止损距离，正常放行
+        risk = self.engine._risk_brake(s15m, s1h, "long", {"tier": "normal", "position_factor": 1.0}, [])
+        self.assertIsNotNone(risk)
+        # 极高杠杆（100x）→ 强平价 99.5，距离 0.5 < 止损距离 1.5 → 拦截（防爆仓）
+        with mock.patch.object(config, "BINANCE_RISK_LEVERAGE", 100):
+            risk = self.engine._risk_brake(s15m, s1h, "long", {"tier": "normal", "position_factor": 1.0}, [])
         self.assertIsNone(risk)
 
     def test_block_low_risk_reward(self):
@@ -246,13 +253,21 @@ class TestEvaluateEndToEnd(unittest.TestCase):
         if card is None:
             self.fail(f"合成强多头场景未产出信号，被拒原因: {self.engine.rejections.get('TEST/USDT:USDT')}")
 
-    def test_bear_market_blocks_long(self):
+    def test_bear_market_softens_long(self):
+        """市场环境不做硬拦截（143a594：短线代币与 BTC 此消彼长），bear 仅影响打分加分。
+
+        强多头合成场景 + bear 环境：允许出信号（direction=long），或给出明确否决原因。
+        """
         klines = _bull_klines()
         card = self.engine.evaluate("TEST/USDT:USDT", klines,
                                     {"env": "bear", "breadth": 0.3, "btc_bull": False},
                                     [], oi_change=0.02, zones=[])
-        self.assertIsNone(card)
-        self.assertIn("市场环境", self.engine.rejections["TEST/USDT:USDT"])
+        if card is not None:
+            self.assertEqual(card.direction, "long")
+            self.assertGreaterEqual(card.confidence, 50)
+        else:
+            self.assertIn("TEST/USDT:USDT", self.engine.rejections)
+            self.assertTrue(self.engine.rejections["TEST/USDT:USDT"])
 
     def test_insufficient_data(self):
         klines = {"4h": make_klines(n=30), "1h": make_klines(n=30),
