@@ -54,13 +54,16 @@ class DeepScanner:
     # ---------- 0️⃣ 市场环境层 ----------
 
     def _market_env(self) -> dict:
-        """BTC 4h 方向 + 全市场涨跌家数比 → bull/bear/neutral。"""
+        """BTC 4h 方向 + 全市场涨跌家数（涨数/跌数）→ bull/bear/neutral。"""
         tickers = self.fetcher.fetch_24h_tickers()
         breadth = 0.5
+        up_count = down_count = 0
         if tickers:
             up = sum(1 for t in tickers.values() if isinstance(t, dict) and (t.get("percentage") or 0) > 0)
+            down = sum(1 for t in tickers.values() if isinstance(t, dict) and (t.get("percentage") or 0) < 0)
             total = sum(1 for t in tickers.values() if isinstance(t, dict) and t.get("percentage") is not None)
             breadth = up / total if total else 0.5
+            up_count, down_count = up, down
 
         btc_bull = None
         df = self.fetcher.fetch_ohlcv("BTC/USDT:USDT", config.TIMEFRAMES["direction"])
@@ -75,7 +78,8 @@ class DeepScanner:
             env = "bear"
         else:
             env = "neutral"
-        return {"env": env, "breadth": round(breadth, 3), "btc_bull": btc_bull}
+        return {"env": env, "breadth": round(breadth, 3), "btc_bull": btc_bull,
+                "up_count": up_count, "down_count": down_count}
 
     # ---------- 单币扫描 ----------
 

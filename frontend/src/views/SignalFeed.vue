@@ -8,8 +8,9 @@
           {{ env.env === "bull" ? "大盘多头" : env.env === "bear" ? "大盘空头" : "震荡" }}
         </span>
         <span class="env-sub">
-          BTC 4h {{ env.btc_bull ? "多头" : "空头" }} · 涨跌家数比
-          {{ env.breadth != null ? env.breadth.toFixed(2) : "-" }}
+          BTC 4h {{ env.btc_bull ? "多头" : "空头" }} · 涨跌
+          {{ env.up_count != null ? env.up_count + ":" + env.down_count
+            : (env.breadth != null ? env.breadth.toFixed(2) : "-") }}
         </span>
       </div>
       <div class="env-right">

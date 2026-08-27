@@ -128,8 +128,11 @@ function fmtEventTime(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
+  // 事件时间统一以北京时间（UTC+8）展示
+  const bjt = new Date(d.getTime() + 8 * 3600 * 1000);
   const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${bjt.getUTCFullYear()}-${p(bjt.getUTCMonth() + 1)}-${p(bjt.getUTCDate())} `
+    + `${p(bjt.getUTCHours())}:${p(bjt.getUTCMinutes())}（北京时间）`;
 }
 
 async function load() {
