@@ -99,7 +99,12 @@
           <span>预算(USDT)</span>
           <input v-model="execBudget" type="number" step="0.01" min="0" class="ed-input" />
         </div>
-        <div class="ed-tip">默认 = 总余额 50%（当前 {{ (totalBalance * 0.5).toFixed(2) }} USDT）；可修改后确认</div>
+        <div class="ed-tip">
+          默认 = 总余额 50%
+          <template v-if="totalBalance">（当前 {{ (totalBalance * 0.5).toFixed(2) }} USDT）</template>
+          <template v-else>（余额获取中…可手动输入预算）</template>
+          ；可修改后确认
+        </div>
       </div>
     </van-dialog>
 
@@ -262,19 +267,20 @@ const execBudget = ref(0);
 const execLeverage = ref(3); // 默认 3 倍，可选 1~5
 const totalBalance = ref(0);
 
-// 一键执行：先拉余额 → 弹出可调预算的确认框（默认 = 总余额 50%）
+// 一键执行：先立即弹窗（秒开），余额后台拉取后更新默认预算
 async function onExecute() {
+  execLeverage.value = 3;
+  totalBalance.value = 0;
+  execBudget.value = 0;
+  showExecDialog.value = true;
   try {
     const acct = await api.account();
-    if (!acct.ok) {
-      showToast(acct.error || "账户余额获取失败");
-      return;
+    if (acct.ok) {
+      totalBalance.value = Number(acct.total) || 0;
+      execBudget.value = Math.floor(totalBalance.value * 0.5 * 100) / 100; // 默认 50%
     }
-    totalBalance.value = Number(acct.total) || 0;
-    execBudget.value = Math.floor(totalBalance.value * 0.5 * 100) / 100; // 默认 50%
-    showExecDialog.value = true;
   } catch (e) {
-    showToast(e.message);
+    /* 余额获取失败不阻塞弹窗，用户可手动输入预算 */
   }
 }
 async function confirmExecute() {
