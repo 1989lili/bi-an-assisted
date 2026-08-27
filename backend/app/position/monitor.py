@@ -180,13 +180,33 @@ class PositionMonitor:
         if not self.executor.configured:
             logger.warning("未配置币安凭据，无法自动平仓 %s", pos.get("symbol"))
             return
+        # 平仓前校验币安实际持仓：用户可能已手动平仓/爆仓，避免 reduceOnly 空转（-2022）
+        try:
+            ex_pos = self.executor.fetch_position(pos["symbol"])
+        except Exception as exc:  # noqa: BLE001 - 查询失败维持 open，下轮重试
+            logger.warning("平仓前持仓查询失败 %s: %s", pos["symbol"], exc)
+            return
+        if ex_pos is None:
+            # 币安已无此仓位：直接同步关闭 DB（保留 realized_pnl=0，不阻塞后续）
+            price = float(outcome.get("price") or pos.get("entry_price") or 0)
+            db.update_position(pos["id"], status="closed", realized_pnl=0.0,
+                               closed_at=datetime.now(timezone.utc).isoformat())
+            logger.warning("币安无实际持仓，同步关闭 DB 记录 %s %s（用户手动平仓或爆仓）",
+                           pos["symbol"], pos["direction"])
+            return
+        # 币安仓位与 DB 方向不一致：保守跳过（下轮重试），避免误平反向仓
+        if ex_pos["side"] != pos["direction"]:
+            logger.warning("币安持仓方向 %s 与 DB %s 不一致，跳过自动平仓 %s",
+                           ex_pos["side"], pos["direction"], pos["symbol"])
+            return
         # H7：平仓前先撤交易所侧止损单
         stop_order_id = pos.get("stop_order_id")
         if stop_order_id:
             self.executor.cancel_order(pos["symbol"], stop_order_id)
         side = "sell" if pos["direction"] == "long" else "buy"
         pos_side = "LONG" if pos["direction"] == "long" else "SHORT"
-        order = self.executor.create_order(pos["symbol"], side, float(pos.get("qty") or 0),
+        qty = float(ex_pos["contracts"])  # 以币安实际数量平仓（DB qty 可能不同步）
+        order = self.executor.create_order(pos["symbol"], side, qty,
                                            order_type="market", reduce_only=True, position_side=pos_side)
         if not order.get("ok"):
             # H4：下单失败不回滚为 closed（保持 open，下轮重试）
@@ -194,7 +214,6 @@ class PositionMonitor:
             return
         price = float(outcome.get("price") or pos.get("entry_price") or 0)
         entry = float(pos.get("entry_price") or 0)
-        qty = float(pos.get("qty") or 0)
         pnl = (price - entry) * qty if pos["direction"] == "long" else (entry - price) * qty
         closed_at = datetime.now(timezone.utc).isoformat()
         db.update_position(pos["id"], status="closed", realized_pnl=round(pnl, 8), closed_at=closed_at)

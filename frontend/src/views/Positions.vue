@@ -28,6 +28,10 @@
           <div class="mv">{{ fmtNum(p.entry_price) }}</div>
         </div>
         <div class="m">
+          <div class="mk">杠杆</div>
+          <div class="mv">{{ p.leverage ? p.leverage + "x" : "-" }}</div>
+        </div>
+        <div class="m">
           <div class="mk">止损阶段</div>
           <div class="mv stage">{{ stageText(p) }}</div>
         </div>
@@ -181,7 +185,7 @@ onMounted(() => {
 .pos-pnl.bad { color: #ff453a; }
 .close-btn { margin-left: 8px; }
 .pos-metrics {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(82px, 1fr)); gap: 6px; margin-top: 10px;
 }
 .m { background: #2c2c2e; border-radius: 8px; padding: 6px 8px; }
 .mk { font-size: 11px; color: #8e8e93; }

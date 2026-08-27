@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS positions (
     realized_pnl REAL,                   -- 平仓时写入的已实现盈亏（USDT）
     stop_order_id TEXT,                  -- 交易所侧 STOP_MARKET 止损单 id（H7）
     macro_protected INTEGER DEFAULT 0,   -- 宏观静默窗口内已执行过保护（收紧止损/减仓）
+    leverage INTEGER DEFAULT 3,          -- 开仓时设置的杠杆倍数（1~5）
     opened_at   TEXT NOT NULL,
     closed_at   TEXT
 );
@@ -98,6 +99,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("realized_pnl", "ALTER TABLE positions ADD COLUMN realized_pnl REAL"),
         ("stop_order_id", "ALTER TABLE positions ADD COLUMN stop_order_id TEXT"),
         ("macro_protected", "ALTER TABLE positions ADD COLUMN macro_protected INTEGER DEFAULT 0"),
+        ("leverage", "ALTER TABLE positions ADD COLUMN leverage INTEGER DEFAULT 3"),
     ):
         if col not in pos_cols:
             conn.execute(ddl)
@@ -239,12 +241,13 @@ def get_signal(signal_id: str) -> dict | None:
 
 def create_position(symbol: str, direction: str, entry_price: float, qty: float,
                     stop_price: float | None = None, stop_stage: int = 1,
-                    strategy: str = "short", signal_id: str | None = None) -> int:
+                    strategy: str = "short", signal_id: str | None = None,
+                    leverage: int = 3) -> int:
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO positions (symbol, direction, entry_price, qty, stop_stage, stop_price, status, strategy, signal_id, opened_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
-            (symbol, direction, entry_price, qty, stop_stage, stop_price, strategy, signal_id, _now()),
+            "INSERT INTO positions (symbol, direction, entry_price, qty, stop_stage, stop_price, status, strategy, signal_id, leverage, opened_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)",
+            (symbol, direction, entry_price, qty, stop_stage, stop_price, strategy, signal_id, leverage, _now()),
         )
         return int(cur.lastrowid)
 
@@ -267,7 +270,7 @@ def update_position(position_id: int, **fields) -> bool:
     """按字段名白名单更新持仓（防注入）。"""
     allowed = {"direction", "entry_price", "qty", "stop_stage", "stop_price", "status",
                "strategy", "signal_id", "realized_pnl", "stop_order_id", "closed_at",
-               "macro_protected"}
+               "macro_protected", "leverage"}
     cols = {k: v for k, v in fields.items() if k in allowed}
     if not cols:
         return False

@@ -273,7 +273,8 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
 
         pid = db.create_position(symbol, direction, price, amount,
                                  stop_price=exec_plan.get("stop_loss") or None, stop_stage=1,
-                                 strategy=sig.get("strategy") or "short", signal_id=signal_id)
+                                 strategy=sig.get("strategy") or "short", signal_id=signal_id,
+                                 leverage=lev)
         # H7：给持仓挂交易所侧 STOP_MARKET 止损单（进程外保护；失败不阻塞，position_monitor 兜底）
         stop_price = exec_plan.get("stop_loss")
         if stop_price:

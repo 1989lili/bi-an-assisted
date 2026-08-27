@@ -108,6 +108,21 @@ class BinanceExecutor:
             logger.warning("余额查询失败: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def fetch_position(self, symbol: str) -> dict | None:
+        """单币种实际持仓（双向模式取有仓一侧）。无持仓返回 None；查询失败抛异常。"""
+        if not self.configured:
+            return None
+        for p in self._client().fetch_positions([symbol]):
+            contracts = float(p.get("contracts") or 0)
+            if abs(contracts) > 0:
+                return {
+                    "side": p.get("side") or ("long" if contracts > 0 else "short"),
+                    "contracts": abs(contracts),
+                    "entry_price": p.get("entryPrice"),
+                    "leverage": p.get("leverage"),
+                }
+        return None
+
     def fetch_positions(self) -> list[dict]:
         """U 本位持仓列表（过滤空仓）。
 
