@@ -57,7 +57,7 @@ class DeepScanner:
         """BTC 4h 方向 + 全市场涨跌家数（涨数/跌数）→ bull/bear/neutral。"""
         tickers = self.fetcher.fetch_24h_tickers()
         breadth = 0.5
-        up_count = down_count = 0
+        up_count = down_count = None  # 拉取失败时保持未知（前端显示"-"），避免误报 0:0
         if tickers:
             up = sum(1 for t in tickers.values() if isinstance(t, dict) and (t.get("percentage") or 0) > 0)
             down = sum(1 for t in tickers.values() if isinstance(t, dict) and (t.get("percentage") or 0) < 0)
