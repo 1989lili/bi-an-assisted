@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, WebSocket,
 from pydantic import BaseModel, Field
 
 from .. import config
+from ..calendar import macro
 from ..notify.ws import manager
 from ..position.manager import initial_stop, position_snapshot
 from ..store import db
@@ -34,7 +35,7 @@ _SETTING_ALLOWLIST = frozenset({
     "EXEC_MARKET_PCT", "EXEC_LIMIT_PCT", "EXEC_LIMIT_TTL_BARS",
     "SIGNAL_TTL_BARS", "SIGNAL_COOLDOWN_MINUTES",
     "SL_INIT_COEF", "BE_PROFIT_ATR", "TRAIL_PROFIT_ATR",
-    "MACRO_SILENCE_MINUTES",
+    "MACRO_SILENCE_MINUTES", "MACRO_SILENCE_STOP_ATR", "MACRO_SILENCE_REDUCE_PCT",
     "EMA_TREND_VOL_MULT", "EMA_TREND_RETRACE_LOOKBACK", "EMA_TREND_ENTRY_NEAR_ATR",
     "EMA_TREND_RSI_MIN", "EMA_TREND_RSI_MAX", "EMA_TREND_EXIT_ATR",
     "EMA_TREND_TP_RR", "EMA_TREND_TIME_BARS",
@@ -96,6 +97,8 @@ def status(request: Request) -> dict:
         "rejections": dict(getattr(getattr(deep, "engine", None), "rejections", {}) or {}),
         "last_scan_ts": getattr(deep, "last_scan_ts", None),
         "market_env": getattr(deep, "last_market_env", None),
+        "macro_silence": macro.in_silence_window(),
+        "next_macro_event": macro.next_macro_event(),
         "proxy": config.PROXY,
     }
 

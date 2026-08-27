@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from .. import config
+from ..calendar.macro import in_silence_window
 from ..indicators.engine import atr, ema
 from ..signal.monitor import _exit_type_from_reason
 from ..store import db
@@ -51,6 +52,8 @@ class PositionMonitor:
 
     def check(self) -> list[dict]:
         changed = []
+        # 宏观静默窗口（每轮判定一次）：窗口内对未保护持仓执行保护（减仓/收紧止损）
+        silent = in_silence_window()
         for pos in db.get_positions("open"):
             try:
                 outcome = self._evaluate(pos)
@@ -60,6 +63,12 @@ class PositionMonitor:
             if outcome:
                 self._close(pos, outcome)
                 changed.append({"id": pos["id"], **outcome})
+                continue
+            if silent:
+                try:
+                    self._macro_protect(pos)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("宏观静默保护失败 %s: %s", pos.get("symbol"), exc)
         if changed and self.on_update:
             self.on_update(changed)
         return changed
@@ -105,6 +114,63 @@ class PositionMonitor:
                 stop_stage=res.get("stage", pos.get("stop_stage", 1)),
             )
         return None
+
+    def _macro_protect(self, pos: dict) -> None:
+        """宏观静默窗口内保护已持仓（防插针，每持仓仅执行一次）：
+
+        1) 可选减仓：`MACRO_SILENCE_REDUCE_PCT > 0` 时按比例 reduceOnly 部分平仓
+           （剩余不足币种最小下单量则放弃减仓，仅收紧止损）。
+        2) 收紧止损：移到现价 ± `MACRO_SILENCE_STOP_ATR`×ATR 处（只紧不松，绝不放大风险），
+           并同步交易所侧 STOP_MARKET 单（撤旧单按新数量/新价重挂）。
+        """
+        if int(pos.get("macro_protected") or 0):
+            return
+        df15 = self.fetcher.fetch_ohlcv(pos["symbol"], config.TIMEFRAMES["entry"], limit=60)
+        if df15 is None or len(df15) < 20:
+            return
+        price = float(df15["close"].iloc[-1])
+        atr15 = float(atr(df15).iloc[-1])
+        direction = pos["direction"]
+        qty = float(pos.get("qty") or 0)
+        side = "sell" if direction == "long" else "buy"
+
+        # 1) 可选减仓
+        reduce_pct = float(config.MACRO_SILENCE_REDUCE_PCT or 0)
+        if reduce_pct > 0 and qty > 0 and self.executor.configured:
+            reduce_qty = self.executor.amount_to_precision(pos["symbol"], qty * reduce_pct)
+            remain = round(qty - reduce_qty, 8)
+            min_qty = self.executor.min_amount(pos["symbol"]) or 0
+            if reduce_qty > 0 and remain >= min_qty:
+                order = self.executor.create_order(pos["symbol"], side, reduce_qty,
+                                                   order_type="market", reduce_only=True)
+                if order.get("ok"):
+                    db.update_position(pos["id"], qty=remain)
+                    qty = remain
+                    logger.info("宏观静默减仓 %s %s %s→%s (order=%s)",
+                                pos["symbol"], direction, round(remain + reduce_qty, 8), remain,
+                                order.get("id"))
+
+        # 2) 收紧止损（只紧不松）
+        buf = config.MACRO_SILENCE_STOP_ATR * atr15
+        new_stop = price - buf if direction == "long" else price + buf
+        old_stop = pos.get("stop_price")
+        if old_stop is not None:
+            if direction == "long":
+                new_stop = max(float(old_stop), new_stop)
+            else:
+                new_stop = min(float(old_stop), new_stop)
+        new_stop = round(new_stop, 8)
+
+        # 交易所侧止损单同步：撤旧单，按（可能已减仓的）新数量挂新单
+        new_stop_id = pos.get("stop_order_id")
+        if new_stop_id and self.executor.configured:
+            self.executor.cancel_order(pos["symbol"], new_stop_id)
+            stop_order = self.executor.create_stop_loss_order(pos["symbol"], side, qty, new_stop)
+            new_stop_id = stop_order.get("id") if stop_order.get("ok") else None
+        db.update_position(pos["id"], stop_price=new_stop, macro_protected=1,
+                           stop_order_id=new_stop_id or None)
+        logger.info("宏观静默收紧止损 %s %s: %s → %s (atr=%.6g)",
+                    pos["symbol"], direction, old_stop, new_stop, atr15)
 
     def _close(self, pos: dict, outcome: dict) -> None:
         if not self.executor.configured:

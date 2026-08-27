@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS positions (
     signal_id   TEXT,                    -- 关联信号卡 id
     realized_pnl REAL,                   -- 平仓时写入的已实现盈亏（USDT）
     stop_order_id TEXT,                  -- 交易所侧 STOP_MARKET 止损单 id（H7）
+    macro_protected INTEGER DEFAULT 0,   -- 宏观静默窗口内已执行过保护（收紧止损/减仓）
     opened_at   TEXT NOT NULL,
     closed_at   TEXT
 );
@@ -96,6 +97,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("signal_id", "ALTER TABLE positions ADD COLUMN signal_id TEXT"),
         ("realized_pnl", "ALTER TABLE positions ADD COLUMN realized_pnl REAL"),
         ("stop_order_id", "ALTER TABLE positions ADD COLUMN stop_order_id TEXT"),
+        ("macro_protected", "ALTER TABLE positions ADD COLUMN macro_protected INTEGER DEFAULT 0"),
     ):
         if col not in pos_cols:
             conn.execute(ddl)
@@ -264,7 +266,8 @@ def get_position(position_id: int) -> dict | None:
 def update_position(position_id: int, **fields) -> bool:
     """按字段名白名单更新持仓（防注入）。"""
     allowed = {"direction", "entry_price", "qty", "stop_stage", "stop_price", "status",
-               "strategy", "signal_id", "realized_pnl", "stop_order_id", "closed_at"}
+               "strategy", "signal_id", "realized_pnl", "stop_order_id", "closed_at",
+               "macro_protected"}
     cols = {k: v for k, v in fields.items() if k in allowed}
     if not cols:
         return False
@@ -326,6 +329,13 @@ def add_macro_event(title: str, event_time: str, source: str = "manual") -> None
 def remove_macro_event(event_id: int) -> None:
     with _lock, _connect() as conn:
         conn.execute("DELETE FROM macro_events WHERE id = ?", (event_id,))
+
+
+def delete_macro_events_by_source(source: str) -> int:
+    """删除指定来源（builtin/manual）的全部宏观事件，返回删除条数（重播种用）。"""
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM macro_events WHERE source = ?", (source,))
+        return cur.rowcount
 
 
 # ---------- 费率历史（ROC 计算） ----------

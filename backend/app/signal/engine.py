@@ -362,20 +362,10 @@ class SignalEngine:
     # ==================== 6️⃣ 宏观静默期 ====================
 
     def _macro_silence(self) -> bool:
-        """CPI/非农/FOMC 等事件前后 15 分钟暂停开仓（内置表 + 手动维护）。"""
-        from ..store import db
+        """CPI/PPI/非农/GDP/FOMC/鲍威尔讲话等美国高影响力事件前后 15 分钟暂停开仓。"""
+        from ..calendar.macro import in_silence_window
 
-        now = time.time()
-        rows = db.get_macro_events()  # [{title, event_time(iso)}]
-        window = config.MACRO_SILENCE_MINUTES * 60
-        for row in rows:
-            try:
-                event_ts = _parse_iso_ms(row["event_time"])
-            except (ValueError, TypeError):
-                continue
-            if abs(now - event_ts) <= window:
-                return True
-        return False
+        return in_silence_window()
 
     # ==================== 7️⃣ 执行参数 ====================
 

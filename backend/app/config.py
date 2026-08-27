@@ -134,6 +134,8 @@ DEFAULT_WATCHLIST = ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]  # 初�
 
 # ---------- 宏观静默期 ----------
 MACRO_SILENCE_MINUTES = 15         # 数据公布前后各 15 分钟暂停开仓
+MACRO_SILENCE_STOP_ATR = 0.5       # 静默窗口内持仓止损收紧到现价 0.5×ATR 距离（只紧不松）
+MACRO_SILENCE_REDUCE_PCT = 0.0     # 静默窗口内持仓减仓比例（0=只收紧止损不减仓；0.5=减半仓）
 
 
 # ---------- settings.json 覆盖（优先级：settings.json > 本文件） ----------

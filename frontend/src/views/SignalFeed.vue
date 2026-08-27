@@ -20,6 +20,13 @@
       </div>
     </div>
 
+    <!-- 宏观静默横幅 -->
+    <div class="macro-banner" v-if="macroSilence || nextEvent" :class="{ silent: macroSilence }">
+      <van-icon :name="macroSilence ? 'warning-o' : 'clock-o'" />
+      <span v-if="macroSilence">宏观静默中：{{ nextEvent ? nextEvent.title : "高影响力数据" }} 窗口期，暂停新开仓，持仓已收紧止损</span>
+      <span v-else>距宏观事件 {{ nextEvent.title }} 约 {{ nextEvent.minsAway }} 分钟（届时暂停开仓）</span>
+    </div>
+
     <!-- 扫描状态 -->
     <div class="scan-report">
       <van-icon name="replay" class="spin-icon" />
@@ -81,6 +88,8 @@ import SignalCard from "../components/SignalCard.vue";
 
 const signals = ref([]);
 const env = ref(null);
+const macroSilence = ref(false);
+const nextEvent = ref(null);
 const reportTs = ref(0);
 const reportCandidates = ref([]);
 const reportSignalCount = ref(0);
@@ -132,6 +141,16 @@ function applyReport(data) {
   if (data.signal_count != null) reportSignalCount.value = data.signal_count;
   if (data.rejections) rejections.value = data.rejections;
   if (data.market_env) env.value = { ...data.market_env, ts: data.ts };
+  macroSilence.value = !!data.macro_silence;
+  const ne = data.next_macro_event;
+  if (ne && ne.event_time) {
+    nextEvent.value = {
+      ...ne,
+      minsAway: Math.round((new Date(ne.event_time).getTime() - Date.now()) / 60000),
+    };
+  } else {
+    nextEvent.value = null;
+  }
 }
 
 async function refresh() {
@@ -144,6 +163,8 @@ async function refresh() {
       signal_count: 0,
       rejections: st.rejections,
       market_env: st.market_env,
+      macro_silence: st.macro_silence,
+      next_macro_event: st.next_macro_event,
     });
   } catch (e) {
     console.error("加载信号失败", e);
@@ -195,6 +216,16 @@ onUnmounted(() => clearInterval(timer));
 .conn.on { color: #34c759; }
 .conn.off { color: #ff9f1c; }
 .env-ts { font-size: 11px; color: #8e8e93; }
+.macro-banner {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255, 159, 28, 0.10); border: 1px solid rgba(255, 159, 28, 0.35);
+  border-radius: 8px; padding: 8px 12px;
+  font-size: 12px; color: #ffb84d; margin-bottom: 10px;
+}
+.macro-banner.silent {
+  background: rgba(255, 69, 58, 0.10); border-color: rgba(255, 69, 58, 0.45);
+  color: #ff6b5e; font-weight: 600;
+}
 .scan-report {
   display: flex; align-items: center; gap: 6px;
   background: #1c1c1e; border-radius: 8px; padding: 8px 12px;

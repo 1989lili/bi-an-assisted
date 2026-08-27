@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config
 
 from .api.routes import router
-from .calendar.macro import seed_builtin_events
+from .calendar.macro import reseed_builtin_events
 from .data.fetcher import BinanceFetcher
 from .executor.binance import BinanceExecutor
 from .notify.ws import manager
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """启动：初始化存储 → 构建扫描器 → 启动调度器 → 首轮精扫立即执行。"""
     db.init_db()
-    seed_builtin_events()
+    reseed_builtin_events()
     fetcher = BinanceFetcher()
     coarse = CoarseScanner(fetcher)
     deep = DeepScanner(fetcher, coarse)
