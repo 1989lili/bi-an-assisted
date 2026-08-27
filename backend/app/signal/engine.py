@@ -115,8 +115,8 @@ class SignalEngine:
             self.rejections[symbol] = "仅 C 级扳机（RSI 穿越无量能），只观察"
             return None
 
-        # ---------- 3️⃣ 量能否决 ----------
-        if not self._volume_veto(s15m, oi_change):
+        # ---------- 3️⃣ 量能否决（仅应用于 B 级突破；A 级回踩豁免） ----------
+        if not self._volume_veto(s15m, oi_change, trigger_level):
             self.rejections[symbol] = "量能否决：量比不足且 OI 无增长"
             return None
 
@@ -254,17 +254,17 @@ class SignalEngine:
 
     # ==================== 3️⃣ 量能否决 ====================
 
-    def _volume_veto(self, s15m: dict, oi_change: float | None) -> bool:
-        """量能一票否决（过滤"无量无资金"的假信号），与 A 级回踩协调。
+    def _volume_veto(self, s15m: dict, oi_change: float | None, trigger_level: str | None = None) -> bool:
+        """量能一票否决：仅应用于 B 级（放量突破），过滤"无量无资金"的假突破。
 
-        - A 级回踩天然要求缩量（量比 ≤ VOL_RATIO_LOW<0.7）：缩量蓄势属健康，**豁免**（避免 A 级被误杀）；
-        - 仅当量比在 (0.7, 1.2) 且 OI 变化率 < +1% 时否决——即"既非蓄势也非放量"的中性假信号。
+        - **A 级回踩**：缩量蓄势由 A 级自身确认（量比≤0.7），量能关卡**豁免**（不否决）；
+        - **B 级突破**：必须放量——量比 < VOL_RATIO_VETO(1.2) 且 OI 变化率 < +1% → 否决（假突破）。
         """
+        if trigger_level == "A":
+            return True  # A 级缩量回踩：豁免量能关卡
         vr = s15m["volume_ratio"]
         if vr is None:
             return False
-        if vr <= config.VOL_RATIO_LOW:  # 缩量回踩蓄势 → 豁免
-            return True
         if vr < config.VOL_RATIO_VETO and (oi_change is None or oi_change < config.OI_GROWTH_VETO):
             return False
         return True

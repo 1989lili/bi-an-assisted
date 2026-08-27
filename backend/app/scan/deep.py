@@ -189,8 +189,8 @@ class DeepScanner:
         return card
 
     def _oi_change(self, symbol: str) -> Optional[float]:
-        """OI 近 30 分钟变化率（最近 6 根 5m 数据）。"""
-        df = self.fetcher.fetch_oi_history(symbol, timeframe="5m", limit=6)
+        """OI 近 1 小时变化率（最近 5 根 15m 数据，首根≈1 小时前）。"""
+        df = self.fetcher.fetch_oi_history(symbol, timeframe="15m", limit=5)
         if df is None or len(df) < 2:
             return None
         first = float(df["openInterest"].iloc[0])
