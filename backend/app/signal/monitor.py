@@ -41,10 +41,11 @@ def _exit_type_from_reason(reason: str) -> str:
 
 
 class SignalMonitor:
-    """活跃信号跟踪器：高频更新实时价，判定信号失效。"""
+    """活跃信号跟踪器：高频更新实时价，判定信号失效；无持仓时自动执行新信号（10x/5U）。"""
 
-    def __init__(self, fetcher) -> None:
+    def __init__(self, fetcher, executor=None) -> None:
         self.fetcher = fetcher
+        self.executor = executor
         self.last_check_ts = 0
         self.on_update: Optional[Callable[[list[dict]], None]] = None
 
@@ -53,8 +54,9 @@ class SignalMonitor:
         self.on_update = cb
 
     def check(self) -> list[dict]:
-        """轮询一轮：更新所有活跃信号，返回本轮发生变更的信号列表。"""
+        """轮询一轮：先自动下单（无持仓时），再更新所有活跃信号，返回本轮发生变更的信号列表。"""
         changed = []
+        self._auto_execute_pending()
         for sig in db.get_active_signals():
             if sig.get("status") not in _MONITORED_STATUSES:
                 continue
@@ -65,6 +67,35 @@ class SignalMonitor:
             self.on_update(changed)
         self.last_check_ts = int(time.time() * 1000)
         return changed
+
+    # ---------- 自动下单（默认 10x / 5U；同一时间只持一个币种） ----------
+
+    def _auto_execute_pending(self) -> None:
+        """无持仓时自动执行最早的未执行信号。
+
+        参数用默认（ExecuteRequest()：leverage=None→BINANCE_DEFAULT_LEVERAGE=10，
+        budget_usdt=None→EXEC_DEFAULT_BUDGET_USDT=5）；已有持仓或执行失败则跳过并记录。
+        """
+        if not (self.executor and self.executor.configured):
+            return
+        if db.get_positions("open"):
+            return  # 单币种策略：已有持仓不下单
+        for sig in sorted(db.get_active_signals(), key=lambda s: s.get("created_at", 0)):
+            if sig.get("executed") or sig.get("status") not in _MONITORED_STATUSES:
+                continue
+            try:
+                from ..api.routes import ExecuteRequest, _execute_impl
+
+                res = _execute_impl(self.executor, sig["id"], ExecuteRequest())
+                logger.info("🔔 自动下单 %s %s | %sx / %.1fU | ok=%s | order=%s",
+                            sig.get("symbol"), sig.get("direction"),
+                            res.get("leverage"), res.get("budget_usdt"),
+                            res.get("ok"), res.get("order_id"))
+            except Exception as exc:  # noqa: BLE001 - 失败不影响其他信号
+                logger.info("自动下单跳过 %s %s: %s",
+                            sig.get("symbol"), sig.get("direction"),
+                            getattr(exc, "detail", str(exc)))
+            return  # 每轮只处理最早一个未执行信号
 
     # ---------- 单信号更新 ----------
 

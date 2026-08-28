@@ -33,6 +33,7 @@ _SETTING_ALLOWLIST = frozenset({
     "ATR_COEF_NARROW", "ATR_COEF_NORMAL", "ATR_COEF_WIDE",
     "MIN_RISK_REWARD", "RISK_PER_TRADE",
     "EXEC_MARKET_PCT", "EXEC_LIMIT_PCT", "EXEC_LIMIT_TTL_BARS", "EXEC_DEFAULT_BUDGET_PCT",
+    "EXEC_DEFAULT_BUDGET_USDT", "BINANCE_MAX_LEVERAGE", "BINANCE_DEFAULT_LEVERAGE",
     "SIGNAL_TTL_BARS", "SIGNAL_COOLDOWN_MINUTES",
     "SL_INIT_COEF", "BE_PROFIT_ATR", "TRAIL_PROFIT_ATR",
     "MACRO_SILENCE_MINUTES", "MACRO_SILENCE_STOP_ATR", "MACRO_SILENCE_REDUCE_PCT",
@@ -178,52 +179,63 @@ def get_account(request: Request) -> dict:
     return request.app.state.executor.fetch_balance()
 
 
-@router.post("/signals/{signal_id}/execute")
-def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = Body(default=ExecuteRequest())) -> dict:
-    """一键执行信号：按信号卡执行计划下单（dry_run 下仅模拟）并创建本地持仓。
+class ExecuteError(Exception):
+    """执行下单失败（携带 HTTP 状态码与提示，供路由/自动下单共用）。"""
 
-    幂等：进程内互斥锁 + executed 标记，防并发重复下单（单进程 uvicorn 下有效）。
-    budget_usdt: 确认页调整后的预算（缺省 = 总余额 × EXEC_DEFAULT_BUDGET_PCT = 100%）。
+    def __init__(self, status: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+
+
+def _execute_impl(executor, signal_id: str, payload: "ExecuteRequest") -> dict:
+    """一键执行核心（路由与自动下单共用）：校验 → 风控 → 下单 → 建持仓 → 挂止损。
+
+    幂等：进程内互斥锁 + executed 标记。失败抛 ExecuteError(status, detail)。
+    单币种策略：账户已有持仓时拒绝新开仓（同一时间只持一个币种）。
     """
     with _execute_lock:
         sig = db.get_signal(signal_id)
         if sig is None:
-            raise HTTPException(status_code=404, detail="信号不存在")
+            raise ExecuteError(404, "信号不存在")
         if sig.get("executed"):
-            raise HTTPException(status_code=409, detail="信号已执行，请勿重复")
+            raise ExecuteError(409, "信号已执行，请勿重复")
         if sig.get("status") not in ("confirmed", "pending_confirm"):
-            raise HTTPException(status_code=400, detail=f"信号状态 {sig.get('status')} 不可执行")
+            raise ExecuteError(400, f"信号状态 {sig.get('status')} 不可执行")
 
-        executor = request.app.state.executor
         if not executor.configured:
-            raise HTTPException(status_code=503, detail="未配置币安 API Key/Secret")
+            raise ExecuteError(503, "未配置币安 API Key/Secret")
+
+        # 单币种策略：同一时间只持仓一个币种（自动/手动下单统一限制）
+        if db.get_positions("open"):
+            raise ExecuteError(409, "已有持仓（本账户同一时间只持一个币种），暂不执行新信号")
 
         exec_plan = sig.get("execution") or {}
         symbol = sig["symbol"]
         direction = sig["direction"]
         price = float(exec_plan.get("market_price") or 0)
         if price <= 0:
-            raise HTTPException(status_code=400, detail="信号缺少执行价格")
+            raise ExecuteError(400, "信号缺少执行价格")
 
         # ---------- 风控门禁：单日开仓上限 + 单日亏损熔断 ----------
         if db.count_positions_opened_today() >= config.BINANCE_DAILY_OPEN_LIMIT:
-            raise HTTPException(status_code=429, detail=f"当日开仓已达上限 {config.BINANCE_DAILY_OPEN_LIMIT}")
+            raise ExecuteError(429, f"当日开仓已达上限 {config.BINANCE_DAILY_OPEN_LIMIT}")
 
         bal = executor.fetch_balance()
         if not bal.get("ok"):
-            raise HTTPException(status_code=503, detail=f"余额查询失败: {bal.get('error')}")
+            raise ExecuteError(503, f"余额查询失败: {bal.get('error')}")
         total = float(bal.get("total") or 0)
         pnl_today = db.sum_realized_pnl_today()
         if total > 0 and pnl_today < 0 and abs(pnl_today) / total >= config.BINANCE_DAILY_LOSS_LIMIT:
-            raise HTTPException(status_code=429, detail="当日亏损已达熔断线，暂停新开仓")
+            raise ExecuteError(429, "当日亏损已达熔断线，暂停新开仓")
         free = float(bal.get("free") or 0)
-        # 杠杆（确认页可选 1~5，默认3；不允许超 BINANCE_MAX_LEVERAGE）
+        # 杠杆（确认页可选 1~10，默认10；不允许超 BINANCE_MAX_LEVERAGE）
         lev = max(1, min(int(payload.leverage or config.BINANCE_DEFAULT_LEVERAGE), config.BINANCE_MAX_LEVERAGE))
-        # 默认预算 = 总余额 × EXEC_DEFAULT_BUDGET_PCT（100% 全部余额）；用户确认页可传 budget_usdt 覆盖
+        # 默认本金 = EXEC_DEFAULT_BUDGET_USDT（固定 5U）；用户确认页可传 budget_usdt 覆盖
         if payload.budget_usdt is not None and payload.budget_usdt > 0:
             budget = max(0.0, min(payload.budget_usdt, total))
         else:
-            budget = total * config.EXEC_DEFAULT_BUDGET_PCT
+            budget = min(config.EXEC_DEFAULT_BUDGET_USDT, total)
         budget = min(budget, free)  # 保证金不能超过可用余额
         # 下单名义 = 保证金 × 杠杆（杠杆放大仓位；保证金占用 = 名义/杠杆 = 预算）
         notional_budget = budget * lev
@@ -239,32 +251,31 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
         amount = market_amount + limit_amount  # 总计划仓位（含限价腿）
         min_amt = executor.min_amount(symbol)
         if market_amount <= 0 or (min_amt > 0 and market_amount < min_amt):
-            raise HTTPException(status_code=400,
-                                detail=f"市价腿数量 {market_amount} 低于币种最小下单量 {min_amt}")
+            raise ExecuteError(400, f"市价腿数量 {market_amount} 低于币种最小下单量 {min_amt}")
         # 币安 U 本位最小名义价值（开仓单非 reduceOnly 必须满足）
         notional = market_amount * price
         if notional < config.BINANCE_MIN_NOTIONAL:
-            raise HTTPException(
-                status_code=400,
-                detail=f"下单名义价值 {notional:.2f} USDT 低于币安最小名义 "
-                       f"{config.BINANCE_MIN_NOTIONAL} USDT（当前余额/预算不足，请充值或调高预算）",
+            raise ExecuteError(
+                400,
+                f"下单名义价值 {notional:.2f} USDT 低于币安最小名义 "
+                f"{config.BINANCE_MIN_NOTIONAL} USDT（当前余额/预算不足，请充值或调高预算）",
             )
 
         # H3 原子占位：下单前先标记 executed（防并发/崩溃窗口"有单无记录"重复下单）
         if not db.mark_signal_executed(signal_id):
-            raise HTTPException(status_code=409, detail="信号已被占用或执行")
+            raise ExecuteError(409, "信号已被占用或执行")
 
         lev_res = executor.set_leverage(symbol, lev)
         if not lev_res.get("ok"):
             db.unmark_signal_executed(signal_id)
-            raise HTTPException(status_code=502, detail=lev_res.get("error"))
+            raise ExecuteError(502, lev_res.get("error"))
 
         side = "buy" if direction == "long" else "sell"
         # 双向持仓模式下开仓单的 positionSide 按订单方向（buy→LONG / sell→SHORT），自动处理
         market = executor.create_order(symbol, side, market_amount, order_type="market")
         if not market.get("ok"):
             db.unmark_signal_executed(signal_id)  # 下单失败回滚占位，允许重试
-            raise HTTPException(status_code=502, detail=f"下单失败: {market.get('error')}")
+            raise ExecuteError(502, f"下单失败: {market.get('error')}")
 
         # 限价腿（30%）：挂限价单（exec_plan.limit_price）；失败不阻塞市价腿
         limit_order = None
@@ -302,6 +313,19 @@ def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = B
             "position_factor": exec_plan.get("position_factor"),
             "mode": executor.mode_label,
         }
+
+
+@router.post("/signals/{signal_id}/execute")
+def execute_signal(signal_id: str, request: Request, payload: ExecuteRequest = Body(default=ExecuteRequest())) -> dict:
+    """一键执行信号：按信号卡执行计划下单（dry_run 下仅模拟）并创建本地持仓。
+
+    budget_usdt: 确认页调整后的预算（缺省 = EXEC_DEFAULT_BUDGET_USDT = 5U）。
+    leverage: 确认页选的杠杆（缺省 = BINANCE_DEFAULT_LEVERAGE = 10）。
+    """
+    try:
+        return _execute_impl(request.app.state.executor, signal_id, payload)
+    except ExecuteError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
 
 # ==================== 自选币 ====================

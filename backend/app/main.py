@@ -42,8 +42,8 @@ async def lifespan(app: FastAPI):
     fetcher = BinanceFetcher()
     coarse = CoarseScanner(fetcher)
     deep = DeepScanner(fetcher, coarse)
-    monitor = SignalMonitor(fetcher)
     executor = BinanceExecutor()
+    monitor = SignalMonitor(fetcher, executor)
     from .position.monitor import PositionMonitor
 
     position_monitor = PositionMonitor(fetcher, executor)

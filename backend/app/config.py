@@ -103,8 +103,8 @@ BINANCE_API_KEY = ""               # 由 data/settings.json 覆盖（用户自�
 BINANCE_API_SECRET = ""            # 敏感字段：GET /api/settings 不外泄
 BINANCE_DRY_RUN = True             # 纸面模式（默认开）；确认小额实盘后再置 False
 BINANCE_MAX_ORDER_USDT = 100       # 单笔下单金额上限（USDT，防误操作超仓）
-BINANCE_MAX_LEVERAGE = 5           # 交易杠杆上限（≤5 倍，不允许超过）
-BINANCE_DEFAULT_LEVERAGE = 3       # 一键执行默认杠杆（确认页可选 1~5）
+BINANCE_MAX_LEVERAGE = 10          # 交易杠杆上限（≤10 倍，不允许超过）
+BINANCE_DEFAULT_LEVERAGE = 10      # 一键执行默认杠杆（确认页可选 1~10）
 BINANCE_RISK_LEVERAGE = 3          # 风控评估假设杠杆（预估强平价用，默认 3）
 BINANCE_MAINT_MARGIN_RATE = 0.005  # U 本位维持保证金率估算（0.5%）
 BINANCE_MIN_NOTIONAL = 5           # 币安 U 本位最小名义价值（USDT，开仓单必须 ≥5）
@@ -117,7 +117,8 @@ APP_AUTH_TOKEN = ""                # 访问令牌（空=不启用鉴权；设置
 # ---------- 执行 ----------
 EXEC_MARKET_PCT = 0.7              # 市价入场 70%
 EXEC_LIMIT_PCT = 0.3               # 限价加仓 30%
-EXEC_DEFAULT_BUDGET_PCT = 1.0      # 一键执行默认预算 = 总余额 × 100%（用户要求直接全部余额；可调回 50%）
+EXEC_DEFAULT_BUDGET_PCT = 1.0      # 一键执行默认预算 = 总余额 × 100%（历史值，现用固定本金 EXEC_DEFAULT_BUDGET_USDT）
+EXEC_DEFAULT_BUDGET_USDT = 5.0     # 一键执行默认本金（USDT，固定 5U；余额不足则按实际余额）
 EXEC_LIMIT_TTL_BARS = 3            # 加仓单 3 根 15m K 线（45 分钟）未成交撤单
 SIGNAL_TTL_BARS = 3                # 信号有效期 3 根 15m K 线
 SIGNAL_COOLDOWN_MINUTES = 30       # 信号冷却：同 symbol/direction/strategy 止损/过期后 30 分钟内不重生成（H8 去重）

@@ -90,7 +90,7 @@
         <div class="ed-row"><span>标的</span><b>{{ shortSymbol(card.symbol) }} {{ card.direction === "long" ? "做多" : "做空" }}</b></div>
         <div class="ed-row">
           <span>杠杆(倍)</span>
-          <input v-model="execLeverage" type="number" min="1" max="5" step="1" class="ed-input" />
+          <input v-model="execLeverage" type="number" min="1" max="10" step="1" class="ed-input" />
         </div>
         <div class="ed-row"><span>拆分</span><b>市价 70% + 限价 30%</b></div>
         <div class="ed-row"><span>止损</span><b>{{ fmtPrice(card.execution?.stop_loss) }}</b></div>
@@ -100,8 +100,9 @@
           <input v-model="execBudget" type="number" step="0.01" min="0" class="ed-input" />
         </div>
         <div class="ed-tip">
-          预算 = 保证金；名义 = 预算 × 杠杆（{{ execLeverage }}x），杠杆放大下单仓位
-          <template v-if="totalBalance">；默认 = 全部余额 {{ totalBalance.toFixed(2) }} USDT</template>
+          默认直接下单：10x 杠杆 / 5U 本金（名义 = 5×10 = 50U）
+          <template v-if="totalBalance">；余额 {{ totalBalance.toFixed(2) }} USDT</template>
+          ；已有持仓时自动跳过
         </div>
       </div>
     </van-dialog>
@@ -262,20 +263,19 @@ const canExecute = computed(() =>
 const executing = ref(false);
 const showExecDialog = ref(false);
 const execBudget = ref(0);
-const execLeverage = ref(3); // 默认 3 倍，可选 1~5
+const execLeverage = ref(10); // 默认 10 倍，可选 1~10
 const totalBalance = ref(0);
 
-// 一键执行：先立即弹窗（秒开），余额后台拉取后更新默认预算
+// 一键执行：先立即弹窗（秒开），余额后台拉取后提示；默认本金固定 5U（10x/5U 自动下单同款参数）
 async function onExecute() {
-  execLeverage.value = 3;
+  execLeverage.value = 10;
   totalBalance.value = 0;
-  execBudget.value = 0;
+  execBudget.value = 5; // 默认本金 5U
   showExecDialog.value = true;
   try {
     const acct = await api.account();
     if (acct.ok) {
       totalBalance.value = Number(acct.total) || 0;
-      execBudget.value = Math.floor(totalBalance.value * 100) / 100; // 默认 = 全部余额
     }
   } catch (e) {
     /* 余额获取失败不阻塞弹窗，用户可手动输入预算 */
@@ -287,7 +287,7 @@ async function confirmExecute() {
     showToast("预算需大于 0");
     return;
   }
-  const lev = Math.min(5, Math.max(1, Number(execLeverage.value) || 3)); // 限制 1~5 倍
+  const lev = Math.min(10, Math.max(1, Number(execLeverage.value) || 10)); // 限制 1~10 倍
   showExecDialog.value = false;
   executing.value = true;
   try {
