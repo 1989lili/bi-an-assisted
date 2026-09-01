@@ -1,16 +1,20 @@
 <template>
-  <div class="sig-card" :class="[card.direction, expired ? 'expired' : '']">
-    <!-- 行1 头部：方向 + 币种 + 扳机 ······ 置信度 -->
+  <div class="sig-card" :class="[card.direction, expired ? 'expired' : '', card.strategy === 'launch_sense' ? 'launch-card' : '']">
+    <!-- 行1 头部：方向 + 币种 + 策略 ······ 置信度/启动感知 -->
     <div class="head">
       <span class="dir-badge" :class="card.direction">
         {{ card.direction === "long" ? "做多" : "做空" }}
       </span>
       <span class="symbol">{{ shortSymbol(card.symbol) }}</span>
       <span class="strat-chip" v-if="card.strategy === 'ema_trend'">EMA趋势</span>
+      <span class="strat-chip launch" v-if="card.strategy === 'launch_sense'">启动感知</span>
       <span class="trigger-chip" v-if="card.trigger_level">
         {{ levelText }}
       </span>
-      <span class="confidence" :class="confClass" @click="showScore = true">{{ card.confidence }}</span>
+      <span class="confidence" :class="confClass" @click="showScore = true" v-if="card.strategy !== 'launch_sense'">
+        {{ card.confidence }}
+      </span>
+      <span class="confidence launch" v-else>🚀 启动</span>
     </div>
 
     <!-- 行2 元信息：生成时间 + 生命周期状态 + 剩余有效期 -->
@@ -18,13 +22,20 @@
       <span class="meta-time">{{ fmtTime(card.created_at) }}</span>
       <span class="status-badge" :class="statusClass">{{ statusText }}</span>
       <span class="ttl" :class="{ warn: ttlMin < 10 }" v-if="!expired">
-        {{ card.strategy === "ema_trend" ? "趋势跟踪" : `有效 ${ttlMin}min` }}
+        {{ card.strategy === "ema_trend" ? "趋势跟踪" : card.strategy === "launch_sense" ? "启动观察" : `有效 ${ttlMin}min` }}
       </span>
     </div>
 
     <!-- 行3 信号摘要（新信号已精简为扳机+量比；旧数据最多 2 行省略） -->
     <div class="reason" v-if="card.reason">{{ card.reason }}</div>
     <div class="exit-reason" v-if="exitReason">离场原因：{{ exitReason }}</div>
+
+    <!-- 行3.5 启动感知：5 指标状态直览 -->
+    <div class="ls-indicators" v-if="card.strategy === 'launch_sense'">
+      <span v-for="(kv, name) in card.levels_detail" :key="name" class="ls-item" :class="lsClass(kv)">
+        {{ name }}:{{ kv["状态"] || "-" }}
+      </span>
+    </div>
 
     <!-- 行4 引擎关卡（点击"详情"查看各关卡判定数值） -->
     <div class="levels">
@@ -49,8 +60,8 @@
       <span class="live-ts">{{ card.live_updated_at ? fmtClock(card.live_updated_at) : "" }}</span>
     </div>
 
-    <!-- 行6 执行参数 2×2 网格 -->
-    <div class="exec">
+    <!-- 行6 执行参数 2×2 网格（启动感知卡不展示） -->
+    <div class="exec" v-if="card.strategy !== 'launch_sense'">
       <div class="exec-row">
         <span class="exec-cell main">
           <i>市价</i>{{ fmtPrice(card.execution?.market_price) }} {{ quote }}<em>×{{ card.execution?.market_pct ?? 70 }}%</em>
@@ -69,8 +80,8 @@
       </div>
     </div>
 
-    <!-- 行7 底部：盈亏比 + 费率档位 + 一键执行 -->
-    <div class="foot">
+    <!-- 行7 底部：盈亏比 + 费率档位 + 一键执行（启动感知卡不展示） -->
+    <div class="foot" v-if="card.strategy !== 'launch_sense'">
       <span class="rr">{{ card.strategy === "ema_trend" ? "盈亏比 趋势跟踪" : `盈亏比 ${rr}` }}</span>
       <span class="funding" :style="{ color: FUNDING_TIER[card.funding?.tier]?.color }">
         {{ FUNDING_TIER[card.funding?.tier]?.text || "费率" }}
@@ -176,6 +187,13 @@ function fmtDetailVal(v) {
   if (v === false) return "✗";
   if (typeof v === "object" && v !== null) return JSON.stringify(v);
   return String(v);
+}
+// 启动感知指标状态样式：✓=达标 / ✗=未达标 / 待定
+function lsClass(kv) {
+  const s = kv && kv["状态"];
+  if (s === "✓") return "ok";
+  if (s === "✗") return "bad";
+  return "pending";
 }
 
 const quote = quoteSymbol(props.card.symbol);
@@ -316,6 +334,13 @@ function okClass(v) {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 .sig-card.short { border-left-color: #ff453a; }
+/* 启动感知卡：橙色背景区分（不打分，纯观察信号） */
+.sig-card.launch-card {
+  background: linear-gradient(135deg, #2b2016, #1c1c1e);
+  border-left-color: #ff9f1c;
+  border: 1px solid rgba(255, 159, 28, 0.35);
+}
+.sig-card.launch-card .symbol { color: #ffb84d; }
 /* 过期：整体置灰 + 降透明度（沉底排序在 SignalFeed） */
 .sig-card.expired {
   background: #232326;
@@ -344,6 +369,17 @@ function okClass(v) {
 .confidence.high { color: #34c759; }
 .confidence.mid { color: #ff9f1c; }
 .confidence.low { color: #8e8e93; }
+.confidence.launch { color: #ff9f1c; font-size: 13px; }
+
+/* 启动感知：5 指标状态直览 */
+.ls-indicators { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+.ls-item {
+  font-size: 11px; padding: 2px 8px; border-radius: 6px;
+  background: #2c2c2e; color: #8e8e93; border: 1px solid transparent;
+}
+.ls-item.ok { background: rgba(52, 199, 89, 0.12); color: #34c759; border-color: rgba(52, 199, 89, 0.3); }
+.ls-item.bad { background: rgba(255, 69, 58, 0.10); color: #ff453a; border-color: rgba(255, 69, 58, 0.25); }
+.ls-item.pending { background: rgba(255, 159, 28, 0.08); color: #ff9f1c; border-color: rgba(255, 159, 28, 0.2); }
 
 /* 行2 元信息：时间 + 状态徽章 + 剩余有效期 */
 .meta {

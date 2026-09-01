@@ -113,6 +113,11 @@ class DeepScanner:
         ema_signal = self._scan_ema_trend(symbol, klines)
         if ema_signal is not None:
             found.append(ema_signal)
+
+        # 策略三（标的启动感知，不打分/橙色卡）
+        ls_signal = self._scan_launch_sense(symbol, klines, funding_history)
+        if ls_signal is not None:
+            found.append(ls_signal)
         return found
 
     def _should_emit(self, symbol: str, direction: str, strategy: str) -> bool:
@@ -190,6 +195,61 @@ class DeepScanner:
         card.id = f"{card.id}_ema"  # 与短线策略 id 区分，避免同 symbol/方向/毫秒碰撞
         db.save_signal(card)
         logger.info("🌊 EMA趋势信号: %s %s | %s 分 | %s", symbol, res["direction"], res["confidence"], res["reason"])
+        return card
+
+    def _scan_launch_sense(self, symbol: str, klines: dict, funding_history: list[dict]):
+        """策略三：标的启动感知（5 指标框架，不打分）。信号卡橙背景展示指标明细。"""
+        from ..strategy.launch_sense import evaluate as ls_eval
+        from ..signal.engine import SignalCard
+
+        res = ls_eval(klines, funding_history)
+        if res is None:
+            return None
+        direction = res["direction"]
+        if not self._should_emit(symbol, direction, "launch_sense"):
+            logger.debug("启动感知信号去重跳过 %s %s", symbol, direction)
+            return None
+
+        df15 = klines["15m"]
+        last_close = float(df15["close"].iloc[-1])
+        ind = res["indicators"]
+        # 指标明细（前端橙色卡展示）：中文名 → {状态, 判定值/说明}
+        _LABEL = {
+            "volume_burst": "成交量爆发",
+            "volatility_expansion": "波动率扩张",
+            "ma": "均线",
+            "funding_change": "资金面质变",
+            "multi_tf": "多周期共振",
+        }
+        levels_detail = {}
+        for key, v in ind.items():
+            ok = v.get("pass")
+            levels_detail[_LABEL.get(key, key)] = {
+                "状态": "✓" if ok else ("✗" if ok is False else "待定"),
+                "判定": v.get("note", ""),
+            }
+        exec_plan = {
+            "market_price": round(last_close, 8),
+            "market_pct": 0, "limit_pct": 0,
+            "stop_loss": None, "target": None,
+            "position_factor": 1.0,
+        }
+        card = SignalCard(
+            symbol=symbol,
+            direction=direction,
+            confidence=0,  # 启动感知不打分
+            levels={"strategy": "launch_sense"},
+            trigger_level="",
+            funding={"tier": "unknown", "rate": None, "position_factor": 1.0},
+            execution=exec_plan,
+            reason=res["reason"],
+            strategy="launch_sense",
+        )
+        card.levels_detail = levels_detail
+        card.status = "confirmed"
+        card.id = f"{card.id}_ls"  # 与套1/策略一 id 区分
+        db.save_signal(card)
+        logger.info("🚀 启动感知信号: %s %s | %s", symbol, direction, res["reason"])
         return card
 
     def _oi_change(self, symbol: str) -> Optional[float]:
