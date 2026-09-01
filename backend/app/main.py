@@ -49,11 +49,13 @@ async def lifespan(app: FastAPI):
     position_monitor = PositionMonitor(fetcher, executor)
 
     def on_scan_complete(signals: list) -> None:
-        """每轮精扫完成：广播信号与扫描报告。"""
+        """每轮精扫完成：广播信号与扫描报告 + 更新启动感知观察小池。"""
         if signals:
             manager.broadcast(
                 "signal:new", {"signals": [s.to_dict() for s in signals]}
             )
+        # 启动感知：L1+L2 预筛小池变化 → 5m 监听器重连（实时评估 L3）
+        launch_watch.update_pool(deep.launch_pool)
         manager.broadcast(
             "scan:report",
             {
@@ -63,6 +65,8 @@ async def lifespan(app: FastAPI):
                 "market_env": deep.last_market_env,
                 "candidates": list(deep.last_pool),
                 "rejections": dict(deep.engine.rejections),
+                "launch_pool_size": len(deep.launch_pool),
+                "launch_pool": sorted(deep.launch_pool),
             },
         )
 
@@ -75,6 +79,16 @@ async def lifespan(app: FastAPI):
         """持仓风控变更：平仓广播（position:update）。"""
         if changed:
             manager.broadcast("position:update", {"positions": changed})
+
+    def on_launch_signal(card) -> None:
+        """启动感知实时信号 → 广播。"""
+        manager.broadcast("signal:new", {"signals": [card.to_dict()]})
+
+    # 启动感知 5m 监听器（L1+L2 小池实时评估 L3）
+    from .scan.launch_watch import LaunchSenseWatcher
+
+    launch_watch = LaunchSenseWatcher(fetcher, on_signal=on_launch_signal)
+    launch_watch.start()
 
     scheduler = build_scheduler(
         coarse, deep, on_scan_complete=on_scan_complete,
@@ -90,6 +104,7 @@ async def lifespan(app: FastAPI):
     app.state.executor = executor
     app.state.position_monitor = position_monitor
     app.state.scheduler = scheduler
+    app.state.launch_watch = launch_watch
 
     # WS 广播绑定主事件循环（调度线程经 run_coroutine_threadsafe 提交）
     manager.bind_loop(asyncio.get_running_loop())

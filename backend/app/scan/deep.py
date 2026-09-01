@@ -27,6 +27,8 @@ class DeepScanner:
         self.last_pool: list[str] = []
         self.last_scan_ts: Optional[int] = None
         self.last_market_env: dict | None = None
+        # 启动感知观察小池（L1+L2 预筛通过，供 LaunchSenseWatcher 实时监听 5m K线）
+        self.launch_pool: set[str] = set()
 
     def scan(self) -> list[dict]:
         pool = self.coarse.scan()
@@ -198,66 +200,21 @@ class DeepScanner:
         return card
 
     def _scan_launch_sense(self, symbol: str, klines: dict, funding_history: list[dict]):
-        """策略三：标的启动感知（三层漏斗，不打分）。橙色卡展示各层判定值。"""
-        from ..strategy.launch_sense import evaluate as ls_eval
-        from ..signal.engine import SignalCard
+        """启动感知**预筛**（第一层日线 + 第二层 1h BIAS）：通过 → 加入 5m 监听小池。
 
-        # 补充数据：日线（MA180/180日高低）+ 5m Taker Buy Volume
+        第三层（量能/波动/均线）由 LaunchSenseWatcher 在 5m K 线收盘瞬间实时评估。
+        """
+        from ..strategy.launch_sense import prefilter as ls_prefilter
+
         daily = self.fetcher.fetch_ohlcv(symbol, "1d", limit=200)
         if daily is None or len(daily) < 181:
             return None
-        klines = {**klines, "1d": daily}
-        taker = self.fetcher.fetch_ohlcv_taker(symbol, "5m", limit=120)
-
-        res = ls_eval(klines, funding_history, taker)
-        if res is None:
+        h1 = klines.get("1h")
+        if h1 is None:
             return None
-        direction = res["direction"]
-        if not self._should_emit(symbol, direction, "launch_sense"):
-            logger.debug("启动感知信号去重跳过 %s %s", symbol, direction)
-            return None
-
-        df15 = klines["15m"]
-        last_close = float(df15["close"].iloc[-1])
-        # 各层判定明细（前端橙色卡展示）
-        _LABEL = {
-            "layer1": "第一层 日线定方向",
-            "layer2": "第二层 1h乖离",
-            "trigger_volume": "第三层① 量能爆发",
-            "trigger_volatility": "第三层② 波动率扩张",
-            "trigger_ma": "第三层③ 均线抬头",
-        }
-        layers = res["layers"]
-        levels_detail = {}
-        for key, v in layers.items():
-            ok = v.get("pass")
-            levels_detail[_LABEL.get(key, key)] = {
-                "状态": "✓" if ok else ("✗" if ok is False else "待定"),
-                "判定": v.get("note", ""),
-            }
-        exec_plan = {
-            "market_price": round(last_close, 8),
-            "market_pct": 0, "limit_pct": 0,
-            "stop_loss": None, "target": None,
-            "position_factor": 1.0,
-        }
-        card = SignalCard(
-            symbol=symbol,
-            direction=direction,
-            confidence=0,  # 启动感知不打分
-            levels={"strategy": "launch_sense"},
-            trigger_level="",
-            funding={"tier": "unknown", "rate": None, "position_factor": 1.0},
-            execution=exec_plan,
-            reason=res["reason"],
-            strategy="launch_sense",
-        )
-        card.levels_detail = levels_detail
-        card.status = "confirmed"
-        card.id = f"{card.id}_ls"  # 与套1/策略一 id 区分
-        db.save_signal(card)
-        logger.info("🚀 启动感知信号: %s %s | %s", symbol, direction, res["reason"])
-        return card
+        if ls_prefilter(daily, h1):
+            self.launch_pool.add(symbol)
+        return None
 
     def _oi_change(self, symbol: str) -> Optional[float]:
         """OI 近 1 小时变化率（最近 5 根 15m 数据，首根≈1 小时前）。"""

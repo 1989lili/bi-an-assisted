@@ -212,38 +212,59 @@ def _trigger_ma(df5: pd.DataFrame, t: int) -> dict:
 
 # ==================== 组合评估 ====================
 
+def prefilter(daily: pd.DataFrame, h1: pd.DataFrame) -> Optional[dict]:
+    """预筛（第一层 + 第二层）：日线底部 + 1h BIAS。
+
+    通过 → 返回 {"direction": "long", "layers": {layer1, layer2}}（进入 5m 监听小池）；
+    不通过 → None。
+    """
+    layers = {
+        "layer1": layer1_daily(daily),
+        "layer2": layer2_bias(h1),
+    }
+    if not (layers["layer1"]["pass"] and layers["layer2"]["pass"]):
+        return None
+    return {"direction": "long", "layers": layers}
+
+
+def check_l3(df5: pd.DataFrame, taker_5m: pd.DataFrame | None) -> Optional[dict]:
+    """第三层执行扳机（5m K 线收盘时评估）：①量能 ②波动率 ③均线，三条件同时满足。
+
+    通过 → {"layers": {trigger_volume, trigger_volatility, trigger_ma}}；不通过 → None。
+    """
+    if df5 is None or len(df5) < 100:
+        return None
+    t = _last_closed_idx(df5)
+    if t < 2:
+        return None
+    layers = {
+        "trigger_volume": _trigger_volume(taker_5m, t),
+        "trigger_volatility": _trigger_volatility(df5, t),
+        "trigger_ma": _trigger_ma(df5, t),
+    }
+    if not all(v["pass"] for v in layers.values()):
+        return None
+    return {"layers": layers}
+
+
 def evaluate(klines: dict, funding_history: list[dict] | None = None,
              taker_5m: pd.DataFrame | None = None) -> Optional[dict]:
-    """三层漏斗评估。klines 需含 '1d'/'1h'/'5m'（'5m' 为普通 OHLCV，taker 另传）。
+    """完整三层漏斗评估（预筛 + L3 扳机；供测试/一次性全量评估）。
 
-    返回 None 或 {"direction":"long", "layers":{...}, "reason": str}。
+    klines 需含 '1d'/'1h'/'5m'。返回 None 或 {"direction","layers","reason"}。
     """
     daily = klines.get("1d")
     h1 = klines.get("1h")
     df5 = klines.get("5m")
     if daily is None or h1 is None or df5 is None:
         return None
-
-    t = _last_closed_idx(df5)
-    if t < 2:
+    pre = prefilter(daily, h1)
+    if pre is None:
         return None
-
-    layers = {
-        "layer1": layer1_daily(daily),
-        "layer2": layer2_bias(h1),
-        "trigger_volume": _trigger_volume(taker_5m, t),
-        "trigger_volatility": _trigger_volatility(df5, t),
-        "trigger_ma": _trigger_ma(df5, t),
-    }
-    # 三层判定：L1 日线 且 L2 BIAS 且 L3（三子条件同时满足）
-    l1_ok = layers["layer1"]["pass"]
-    l2_ok = layers["layer2"]["pass"]
-    l3_ok = (layers["trigger_volume"]["pass"]
-             and layers["trigger_volatility"]["pass"]
-             and layers["trigger_ma"]["pass"])
-    if not (l1_ok and l2_ok and l3_ok):
+    l3 = check_l3(df5, taker_5m)
+    if l3 is None:
         return None
-
+    layers = {**pre["layers"], **l3["layers"]}
     return {
         "direction": "long",  # 底部启动，只做多
         "layers": layers,
