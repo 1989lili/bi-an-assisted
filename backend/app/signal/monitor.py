@@ -71,11 +71,13 @@ class SignalMonitor:
     # ---------- 自动下单（默认 10x / 5U；同一时间只持一个币种） ----------
 
     def _auto_execute_pending(self) -> None:
-        """无持仓时自动执行最早的未执行信号。
+        """无持仓时自动执行最早的未执行信号（总开关 AUTO_EXECUTE_ENABLED）。
 
         参数用默认（ExecuteRequest()：leverage=None→BINANCE_DEFAULT_LEVERAGE=10，
         budget_usdt=None→EXEC_DEFAULT_BUDGET_USDT=5）；已有持仓或执行失败则跳过并记录。
         """
+        if not config.AUTO_EXECUTE_ENABLED:
+            return  # 自动下单已关闭（仅手动执行）
         if not (self.executor and self.executor.configured):
             return
         if db.get_positions("open"):

@@ -115,6 +115,7 @@ BINANCE_DAILY_LOSS_LIMIT = 0.05    # 单日亏损熔断（占总资金比例）
 APP_AUTH_TOKEN = ""                # 访问令牌（空=不启用鉴权；设置后所有 /api 需 Authorization: Bearer <token>）
 
 # ---------- 执行 ----------
+AUTO_EXECUTE_ENABLED = False       # 自动下单总开关（True=信号自动执行 10x/5U；False=仅手动执行）
 EXEC_MARKET_PCT = 0.7              # 市价入场 70%
 EXEC_LIMIT_PCT = 0.3               # 限价加仓 30%
 EXEC_DEFAULT_BUDGET_PCT = 1.0      # 一键执行默认预算 = 总余额 × 100%（历史值，现用固定本金 EXEC_DEFAULT_BUDGET_USDT）
