@@ -124,6 +124,17 @@ EXEC_LIMIT_TTL_BARS = 3            # 加仓单 3 根 15m K 线（45 分钟）未
 SIGNAL_TTL_BARS = 3                # 信号有效期 3 根 15m K 线
 SIGNAL_COOLDOWN_MINUTES = 30       # 信号冷却：同 symbol/direction/strategy 止损/过期后 30 分钟内不重生成（H8 去重）
 
+# ---------- 启动感知策略（三层漏斗） ----------
+LS_BIAS_MIN = 3.0                  # 第二层：1h BIAS 下限 %
+LS_BIAS_MAX = 8.0                  # 第二层：1h BIAS 上限 %
+LS_VOL_MIN_RATIO = 1.5             # 第三层①：3根最低主动买量 > 20均量 × 1.5
+LS_VOL_KEEP_RATIO = 0.85           # 第三层①：最低/最高 ≥ 0.85（缩量≤15% 维持高位）
+LS_BOLL_BAND_RATIO = 0.6           # 第三层②：当前 BOLL 带宽 < 60根均值 × 60%
+LS_ATR_SURGE_PCT = 0.5             # 第三层②：ATR 跳升 > 50%
+LS_MA99_CAP = 1.08                 # 第三层③A：收盘 < MA99 × 1.08（低位启动）
+LS_MA7_SLOPE_PCT = 1.0             # 第三层③D：MA7 斜率 > 1.0%
+LS_AGGRESSIVE = False              # 第三层③激进开关：允许金叉(C)提前一根发生
+
 # ---------- 止损三段式 ----------
 SL_INIT_COEF = 2.0                 # 阶段一：初始止损 2.0×ATR（带宽扩张档）
 BE_PROFIT_ATR = 1.5                # 阶段二：浮盈 ≥1.5×ATR → 保本止损

@@ -198,11 +198,18 @@ class DeepScanner:
         return card
 
     def _scan_launch_sense(self, symbol: str, klines: dict, funding_history: list[dict]):
-        """策略三：标的启动感知（5 指标框架，不打分）。信号卡橙背景展示指标明细。"""
+        """策略三：标的启动感知（三层漏斗，不打分）。橙色卡展示各层判定值。"""
         from ..strategy.launch_sense import evaluate as ls_eval
         from ..signal.engine import SignalCard
 
-        res = ls_eval(klines, funding_history)
+        # 补充数据：日线（MA180/180日高低）+ 5m Taker Buy Volume
+        daily = self.fetcher.fetch_ohlcv(symbol, "1d", limit=200)
+        if daily is None or len(daily) < 181:
+            return None
+        klines = {**klines, "1d": daily}
+        taker = self.fetcher.fetch_ohlcv_taker(symbol, "5m", limit=120)
+
+        res = ls_eval(klines, funding_history, taker)
         if res is None:
             return None
         direction = res["direction"]
@@ -212,17 +219,17 @@ class DeepScanner:
 
         df15 = klines["15m"]
         last_close = float(df15["close"].iloc[-1])
-        ind = res["indicators"]
-        # 指标明细（前端橙色卡展示）：中文名 → {状态, 判定值/说明}
+        # 各层判定明细（前端橙色卡展示）
         _LABEL = {
-            "volume_burst": "成交量爆发",
-            "volatility_expansion": "波动率扩张",
-            "ma": "均线",
-            "funding_change": "资金面质变",
-            "multi_tf": "多周期共振",
+            "layer1": "第一层 日线定方向",
+            "layer2": "第二层 1h乖离",
+            "trigger_volume": "第三层① 量能爆发",
+            "trigger_volatility": "第三层② 波动率扩张",
+            "trigger_ma": "第三层③ 均线抬头",
         }
+        layers = res["layers"]
         levels_detail = {}
-        for key, v in ind.items():
+        for key, v in layers.items():
             ok = v.get("pass")
             levels_detail[_LABEL.get(key, key)] = {
                 "状态": "✓" if ok else ("✗" if ok is False else "待定"),
