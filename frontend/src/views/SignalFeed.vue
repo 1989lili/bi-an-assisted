@@ -78,6 +78,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { showToast } from "vant";
 import { api } from "../api/http";
 import { onWsEvent, startWs, wsState } from "../api/ws";
 import { fmtClock, shortSymbol } from "../utils/format";
@@ -164,6 +165,9 @@ async function refresh() {
     });
   } catch (e) {
     console.error("加载信号失败", e);
+    if ((e.message || "").includes("401")) {
+      showToast("未授权访问：请到设置页填写访问令牌（Token）");
+    }
   } finally {
     loading.value = false;
   }
