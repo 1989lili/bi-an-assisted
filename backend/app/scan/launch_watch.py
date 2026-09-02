@@ -1,10 +1,13 @@
-"""启动感知 5m K 线监听器（实时模式）。
+"""启动感知全在线监听器（L1+L2+L3 全部 K 线收盘事件驱动）。
 
-订阅「L1+L2 预筛小池」币种的 5m kline 收盘流（币安 fstream 组合流），
-每根 5m K 线**收盘瞬间**评估第三层三子条件（量能/波动率/均线），全过即爆信号。
+两条并行流（币安 fstream 组合流，websockets + 代理）：
+- **1h 流**：订阅候选池全部币种 1h kline 收盘 → 实时评估 **L1(日线) + L2(1h BIAS)**，
+  通过 → 进入 L3 观察集（l1l2_pool）；不再满足 → 移出。
+- **5m 流**：订阅 L3 观察集币种 5m kline 收盘 → 实时评估 **L3（量能/波动/均线）**，全过爆信号。
 
-- 小池由 deep scan 预筛（日线 L1 + 1h L2）维护，`update_pool()` 变化时触发重连。
-- 出信号逻辑与扫描版一致（去重/冷却/橙色卡/levels_detail 各层判定值）。
+- 候选池（watchlist）由 deep scan 每 5 分钟同步（粗筛结果，`update_watchlist`）。
+- 观察集变化 → 5m 流自动重连（dirty 机制）。
+- 日线 L1 数据在 1h 收盘评估时按需拉取（缓存 5 分钟，变化慢开销低）。
 """
 from __future__ import annotations
 
@@ -20,19 +23,17 @@ from ..store import db
 
 logger = logging.getLogger(__name__)
 
-_STREAM_SUFFIX = "@kline_5m"
-_MONITORED_STATUSES = ("pending_confirm", "confirmed")
-
 
 class LaunchSenseWatcher:
-    """监听小池 5m K 线收盘 → 实时评估 L3 → 爆信号。"""
+    """全在线三层监听：1h 流评估 L1+L2，5m 流评估 L3。"""
 
     def __init__(self, fetcher, on_signal: Optional[Callable] = None) -> None:
         self.fetcher = fetcher
-        self.on_signal = on_signal          # 回调(card)，main 广播 signal:new
-        self.pool: set[str] = set()          # 观察小池（L1+L2 预筛通过）
+        self.on_signal = on_signal            # 回调(card)，main 广播 signal:new
+        self.watchlist: set[str] = set()       # 候选池（1h 流订阅）
+        self.l1l2_pool: set[str] = set()       # L1+L2 通过（5m 流订阅）
         self._stop = threading.Event()
-        self._dirty = threading.Event()      # pool 变化 → 重连
+        self._dirty = threading.Event()        # watchlist/观察集变化 → 重建流
         self._thread: Optional[threading.Thread] = None
 
     # ---------- 生命周期 ----------
@@ -43,64 +44,84 @@ class LaunchSenseWatcher:
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="launch-watch", daemon=True)
         self._thread.start()
-        logger.info("启动感知 5m 监听线程已启动")
+        logger.info("启动感知全在线监听线程已启动")
 
     def stop(self) -> None:
         self._stop.set()
         self._dirty.set()
 
-    def update_pool(self, symbols) -> None:
-        """更新观察小池（deep scan 预筛后调用）；池变化才触发重连。"""
-        new_pool = set(symbols or [])
-        if new_pool == self.pool:
+    def update_watchlist(self, symbols) -> None:
+        """同步候选池（deep scan 每轮调用）；变化触发流重连 + 新增币初始 L1+L2 评估。"""
+        new = set(symbols or [])
+        if new == self.watchlist:
             return
-        removed = self.pool - new_pool
-        added = new_pool - self.pool
-        self.pool = new_pool
+        added = new - self.watchlist
+        self.watchlist = new
         self._dirty.set()
-        logger.info("启动感知观察小池更新: +%s -%s 共 %s 个",
-                    sorted(added), sorted(removed), len(new_pool))
+        logger.info("启动感知候选池同步: %s 个（触发流重连）", len(new))
+        if added:
+            # 初始 L1+L2 评估（后台线程，避免等下一根 1h K 线的冷启动空窗）
+            threading.Thread(target=self._initial_prefilter, args=(list(added),),
+                             name="launch-initial", daemon=True).start()
+
+    def _initial_prefilter(self, symbols: list[str]) -> None:
+        """对新进入候选池的币立即评估一次 L1+L2（复用 1h 收盘评估逻辑）。"""
+        for sym in symbols:
+            try:
+                self._on_h1_close(sym)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("启动感知初始评估失败 %s: %s", sym, exc)
 
     # ---------- 主循环 ----------
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            pool = list(self.pool)
-            if not pool:
-                time.sleep(3)
-                continue
             try:
-                asyncio.run(self._listen(pool))
+                asyncio.run(self._listen_all())
             except Exception as exc:  # noqa: BLE001 - 连接异常重试
                 if not self._stop.is_set():
-                    logger.warning("启动感知监听连接异常: %s（重连）", exc)
+                    logger.warning("启动感知监听异常: %s（重连）", exc)
             time.sleep(2)  # 重连退避
 
-    async def _listen(self, pool: list[str]) -> None:
-        """连接组合流并收消息；pool 变化（dirty）或 stop 时退出。"""
+    async def _listen_all(self) -> None:
+        """并行监听 1h 流（候选池）与 5m 流（L3 观察集）；任一 dirty/stop 即重建。"""
+        tasks = []
+        if self.watchlist:
+            tasks.append(self._listen_stream("1h", list(self.watchlist), self._on_h1_close))
+        if self.l1l2_pool:
+            tasks.append(self._listen_stream("5m", list(self.l1l2_pool), self._on_5m_close))
+        if not tasks:
+            await asyncio.sleep(3)
+            return
+        self._dirty.clear()
+        logger.info("启动感知监听中: 1h×%s + 5m×%s",
+                    len(self.watchlist), len(self.l1l2_pool))
+        await asyncio.gather(*tasks, return_exceptions=True)
+        # gather 返回（某流断开/超时/stop）→ 外层判断后重连
+
+    async def _listen_stream(self, timeframe: str, symbols: list[str], handler) -> None:
         try:
-            stream_names = "/".join(self._market_id(s).lower() + _STREAM_SUFFIX for s in pool)
-        except Exception as exc:  # noqa: BLE001 - 个别币种 market 信息缺失时跳过整池
-            logger.warning("启动感知 stream 构建失败: %s", exc)
+            stream_names = "/".join(self._market_id(s).lower() + f"@{timeframe}" for s in symbols)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("启动感知流构建失败(%s): %s", timeframe, exc)
+            await asyncio.sleep(5)
             return
         url = f"wss://fstream.binance.com/stream?streams={stream_names}"
         try:
-            async with websockets_connect(url) as ws:
-                self._dirty.clear()
-                logger.info("启动感知 5m K线监听中: %s 个标的", len(pool))
+            async with _connect(url) as ws:
                 while not self._stop.is_set():
                     try:
                         msg = await asyncio.wait_for(ws.recv(), timeout=10)
                     except asyncio.TimeoutError:
                         if self._dirty.is_set():
-                            break  # 小池更新 → 重连
+                            break  # 候选池/观察集变化 → 重建
                         continue
-                    self._handle(msg)
+                    self._dispatch(msg, handler)
         except Exception as exc:  # noqa: BLE001 - 交给外层重连
             if not self._stop.is_set():
                 raise
 
-    def _handle(self, msg: str) -> None:
+    def _dispatch(self, msg: str, handler) -> None:
         try:
             data = json.loads(msg)
             k = data.get("k") or {}
@@ -109,14 +130,37 @@ class LaunchSenseWatcher:
             mid = k.get("s") or ""
             symbol = self._to_symbol(mid)
             if symbol:
-                self._on_close(symbol)
+                handler(symbol)
         except Exception as exc:  # noqa: BLE001
             logger.warning("启动感知 WS 消息解析失败: %s", exc)
 
-    # ---------- K 线收盘评估 ----------
+    # ---------- 1h 收盘 → L1+L2 ----------
 
-    def _on_close(self, symbol: str) -> None:
-        """5m K 线收盘：拉最新数据评估 L3，全过 → 出信号。"""
+    def _on_h1_close(self, symbol: str) -> None:
+        """1h K 线收盘：评估 L1(日线) + L2(BIAS)，维护 L3 观察集。"""
+        from ..strategy.launch_sense import prefilter
+
+        try:
+            daily = self.fetcher.fetch_ohlcv(symbol, "1d", limit=200)
+            h1 = self.fetcher.fetch_ohlcv(symbol, "1h", use_cache=False, limit=60)
+            if daily is None or len(daily) < 181 or h1 is None:
+                return
+            ok = prefilter(daily, h1) is not None
+            if ok and symbol not in self.l1l2_pool:
+                self.l1l2_pool.add(symbol)
+                self._dirty.set()
+                logger.info("启动感知 L1+L2 通过(1h收盘): %s → 进入5m观察", symbol)
+            elif not ok and symbol in self.l1l2_pool:
+                self.l1l2_pool.discard(symbol)
+                self._dirty.set()
+                logger.info("启动感知 L1+L2 失效(1h收盘): %s → 移出5m观察", symbol)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("启动感知 L1+L2 评估失败 %s: %s", symbol, exc)
+
+    # ---------- 5m 收盘 → L3 ----------
+
+    def _on_5m_close(self, symbol: str) -> None:
+        """5m K 线收盘：评估 L3 三子条件，全过 → 出信号。"""
         from ..strategy import launch_sense as ls
 
         try:
@@ -133,8 +177,10 @@ class LaunchSenseWatcher:
             logger.info("🚀 启动感知信号(5m收盘实时): %s long | %s", symbol, res["reason"])
             if self.on_signal:
                 self.on_signal(card)
-        except Exception as exc:  # noqa: BLE001 - 单币失败不影响监听
-            logger.warning("启动感知评估失败 %s: %s", symbol, exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("启动感知 L3 评估失败 %s: %s", symbol, exc)
+
+    # ---------- 信号构造 / 去重 ----------
 
     def _should_emit(self, symbol: str) -> bool:
         pat = '%"strategy": "launch_sense"%'
@@ -145,7 +191,6 @@ class LaunchSenseWatcher:
         return True
 
     def _build_card(self, symbol: str, res: dict):
-        """构造橙色启动感知信号卡（不打分，levels_detail 携带各层判定）。"""
         from ..signal.engine import SignalCard
 
         df5 = self.fetcher.fetch_ohlcv(symbol, "5m", use_cache=True, limit=150)
@@ -186,7 +231,7 @@ class LaunchSenseWatcher:
         card.id = f"{card.id}_ls"
         return card
 
-    # ---------- symbol / market_id 转换 ----------
+    # ---------- symbol / market_id ----------
 
     def _market_id(self, symbol: str) -> str:
         return self.fetcher.exchange.market(symbol)["id"]
@@ -199,7 +244,7 @@ class LaunchSenseWatcher:
             return None
 
 
-def websockets_connect(url: str):
+def _connect(url: str):
     """websockets 连接（带代理支持，websockets>=11）。"""
     import websockets
 

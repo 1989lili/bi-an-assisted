@@ -27,8 +27,6 @@ class DeepScanner:
         self.last_pool: list[str] = []
         self.last_scan_ts: Optional[int] = None
         self.last_market_env: dict | None = None
-        # 启动感知观察小池（L1+L2 预筛通过，供 LaunchSenseWatcher 实时监听 5m K线）
-        self.launch_pool: set[str] = set()
 
     def scan(self) -> list[dict]:
         pool = self.coarse.scan()
@@ -115,11 +113,6 @@ class DeepScanner:
         ema_signal = self._scan_ema_trend(symbol, klines)
         if ema_signal is not None:
             found.append(ema_signal)
-
-        # 策略三（标的启动感知，不打分/橙色卡）
-        ls_signal = self._scan_launch_sense(symbol, klines, funding_history)
-        if ls_signal is not None:
-            found.append(ls_signal)
         return found
 
     def _should_emit(self, symbol: str, direction: str, strategy: str) -> bool:
@@ -198,23 +191,6 @@ class DeepScanner:
         db.save_signal(card)
         logger.info("🌊 EMA趋势信号: %s %s | %s 分 | %s", symbol, res["direction"], res["confidence"], res["reason"])
         return card
-
-    def _scan_launch_sense(self, symbol: str, klines: dict, funding_history: list[dict]):
-        """启动感知**预筛**（第一层日线 + 第二层 1h BIAS）：通过 → 加入 5m 监听小池。
-
-        第三层（量能/波动/均线）由 LaunchSenseWatcher 在 5m K 线收盘瞬间实时评估。
-        """
-        from ..strategy.launch_sense import prefilter as ls_prefilter
-
-        daily = self.fetcher.fetch_ohlcv(symbol, "1d", limit=200)
-        if daily is None or len(daily) < 181:
-            return None
-        h1 = klines.get("1h")
-        if h1 is None:
-            return None
-        if ls_prefilter(daily, h1):
-            self.launch_pool.add(symbol)
-        return None
 
     def _oi_change(self, symbol: str) -> Optional[float]:
         """OI 近 1 小时变化率（最近 5 根 15m 数据，首根≈1 小时前）。"""
