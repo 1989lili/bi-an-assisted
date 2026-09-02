@@ -25,13 +25,19 @@ logger = logging.getLogger(__name__)
 
 
 class LaunchSenseWatcher:
-    """全在线三层监听：1h 流评估 L1+L2，5m 流评估 L3。"""
+    """全在线三层监听：**全市场** 1h 流评估 L1+L2，5m 流评估 L3（不依赖候选池轮询）。"""
+
+    # 单连接组合流最大订阅数（保守留余量，币安上限 200）
+    _STREAM_CHUNK = 150
+    # 全市场列表刷新周期（新上市合约低频，每小时刷新一次即可）
+    _MARKET_REFRESH_SEC = 3600
 
     def __init__(self, fetcher, on_signal: Optional[Callable] = None) -> None:
         self.fetcher = fetcher
         self.on_signal = on_signal            # 回调(card)，main 广播 signal:new
-        self.watchlist: set[str] = set()       # 候选池（1h 流订阅）
+        self.watchlist: set[str] = set()       # 全市场合约（1h 流订阅）
         self.l1l2_pool: set[str] = set()       # L1+L2 通过（5m 流订阅）
+        self._lock = threading.Lock()
         self._stop = threading.Event()
         self._dirty = threading.Event()        # watchlist/观察集变化 → 重建流
         self._thread: Optional[threading.Thread] = None
@@ -50,32 +56,74 @@ class LaunchSenseWatcher:
         self._stop.set()
         self._dirty.set()
 
-    def update_watchlist(self, symbols) -> None:
-        """同步候选池（deep scan 每轮调用）；变化触发流重连 + 新增币初始 L1+L2 评估。"""
+    # ---------- 全市场列表 ----------
+
+    def refresh_market(self, symbols=None) -> None:
+        """刷新监控池：**24h 成交额排名 LS_RANK_START~LS_RANK_END** 的合约（默认第 20~220 名，共 200 个）。
+
+        新增币触发初始 L1+L2 评估。symbols 传入时直接使用（测试/覆盖用）。
+        """
+        if symbols is None:
+            tickers = self.fetcher.fetch_24h_tickers()
+            if not tickers:
+                return
+            # 按 24h 成交额降序，取指定排名区间
+            ranked = sorted(
+                tickers.items(),
+                key=lambda kv: float((kv[1] or {}).get("quoteVolume") or 0),
+                reverse=True,
+            )
+            symbols = [sym for sym, _ in ranked[config.LS_RANK_START:config.LS_RANK_END]]
         new = set(symbols or [])
-        if new == self.watchlist:
+        with self._lock:
+            added = new - self.watchlist
+            self.watchlist = new
+        if not added and not new:
             return
-        added = new - self.watchlist
-        self.watchlist = new
         self._dirty.set()
-        logger.info("启动感知候选池同步: %s 个（触发流重连）", len(new))
+        logger.info("启动感知监控池同步: %s 个（成交额排名 %s~%s，新增 %s）",
+                    len(new), config.LS_RANK_START, config.LS_RANK_END, len(added))
         if added:
-            # 初始 L1+L2 评估（后台线程，避免等下一根 1h K 线的冷启动空窗）
             threading.Thread(target=self._initial_prefilter, args=(list(added),),
                              name="launch-initial", daemon=True).start()
 
     def _initial_prefilter(self, symbols: list[str]) -> None:
-        """对新进入候选池的币立即评估一次 L1+L2（复用 1h 收盘评估逻辑）。"""
-        for sym in symbols:
+        """对新合约立即评估一次 L1+L2（并发，避免等 1h 收盘冷启动空窗）。"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        from ..strategy.launch_sense import prefilter
+
+        def _eval(sym: str) -> Optional[str]:
             try:
-                self._on_h1_close(sym)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("启动感知初始评估失败 %s: %s", sym, exc)
+                daily = self.fetcher.fetch_ohlcv(sym, "1d", limit=200)
+                h1 = self.fetcher.fetch_ohlcv(sym, "1h", use_cache=False, limit=60)
+                if daily is None or len(daily) < 181 or h1 is None:
+                    return None
+                return sym if prefilter(daily, h1) else None
+            except Exception:  # noqa: BLE001
+                return None
+
+        passed = []
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for fut in as_completed([ex.submit(_eval, s) for s in symbols]):
+                r = fut.result()
+                if r:
+                    passed.append(r)
+        if passed:
+            with self._lock:
+                self.l1l2_pool.update(passed)
+            self._dirty.set()
+            logger.info("启动感知初始 L1+L2 通过 %s 个: %s", len(passed), passed[:10])
 
     # ---------- 主循环 ----------
 
     def _run(self) -> None:
+        last_refresh = 0.0
         while not self._stop.is_set():
+            now = time.time()
+            if now - last_refresh >= self._MARKET_REFRESH_SEC or not self.watchlist:
+                self.refresh_market()
+                last_refresh = now
             try:
                 asyncio.run(self._listen_all())
             except Exception as exc:  # noqa: BLE001 - 连接异常重试
@@ -84,18 +132,25 @@ class LaunchSenseWatcher:
             time.sleep(2)  # 重连退避
 
     async def _listen_all(self) -> None:
-        """并行监听 1h 流（候选池）与 5m 流（L3 观察集）；任一 dirty/stop 即重建。"""
+        """并行监听：全市场 1h 流（分片连接）+ L3 观察集 5m 流。"""
+        with self._lock:
+            h1_syms = list(self.watchlist)
+            l3_syms = list(self.l1l2_pool)
         tasks = []
-        if self.watchlist:
-            tasks.append(self._listen_stream("1h", list(self.watchlist), self._on_h1_close))
-        if self.l1l2_pool:
-            tasks.append(self._listen_stream("5m", list(self.l1l2_pool), self._on_5m_close))
+        # 1h 流分片（每片 ≤150 streams，避开单连接上限）
+        for i in range(0, len(h1_syms), self._STREAM_CHUNK):
+            chunk = h1_syms[i:i + self._STREAM_CHUNK]
+            tasks.append(self._listen_stream("1h", chunk, self._on_h1_close))
+        # 5m 流（仅 L3 观察集）
+        if l3_syms:
+            tasks.append(self._listen_stream("5m", l3_syms, self._on_5m_close))
         if not tasks:
             await asyncio.sleep(3)
             return
         self._dirty.clear()
-        logger.info("启动感知监听中: 1h×%s + 5m×%s",
-                    len(self.watchlist), len(self.l1l2_pool))
+        logger.info("启动感知监听中: 1h×%s（%s 连接）+ 5m×%s",
+                    len(h1_syms), (len(h1_syms) + self._STREAM_CHUNK - 1) // self._STREAM_CHUNK,
+                    len(l3_syms))
         await asyncio.gather(*tasks, return_exceptions=True)
         # gather 返回（某流断开/超时/stop）→ 外层判断后重连
 
@@ -146,14 +201,19 @@ class LaunchSenseWatcher:
             if daily is None or len(daily) < 181 or h1 is None:
                 return
             ok = prefilter(daily, h1) is not None
-            if ok and symbol not in self.l1l2_pool:
-                self.l1l2_pool.add(symbol)
+            with self._lock:
+                if ok and symbol not in self.l1l2_pool:
+                    self.l1l2_pool.add(symbol)
+                    logger.info("启动感知 L1+L2 通过(1h收盘): %s → 进入5m观察", symbol)
+                    changed = True
+                elif not ok and symbol in self.l1l2_pool:
+                    self.l1l2_pool.discard(symbol)
+                    logger.info("启动感知 L1+L2 失效(1h收盘): %s → 移出5m观察", symbol)
+                    changed = True
+                else:
+                    changed = False
+            if changed:
                 self._dirty.set()
-                logger.info("启动感知 L1+L2 通过(1h收盘): %s → 进入5m观察", symbol)
-            elif not ok and symbol in self.l1l2_pool:
-                self.l1l2_pool.discard(symbol)
-                self._dirty.set()
-                logger.info("启动感知 L1+L2 失效(1h收盘): %s → 移出5m观察", symbol)
         except Exception as exc:  # noqa: BLE001
             logger.warning("启动感知 L1+L2 评估失败 %s: %s", symbol, exc)
 
