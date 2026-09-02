@@ -49,13 +49,11 @@ async def lifespan(app: FastAPI):
     position_monitor = PositionMonitor(fetcher, executor)
 
     def on_scan_complete(signals: list) -> None:
-        """每轮精扫完成：广播信号与扫描报告 + 同步启动感知候选池。"""
+        """每轮精扫完成：广播信号与扫描报告（启动感知由 watcher 自管理全市场排名池）。"""
         if signals:
             manager.broadcast(
                 "signal:new", {"signals": [s.to_dict() for s in signals]}
             )
-        # 启动感知：候选池同步（1h 流监听 L1+L2，在线维护 L3 观察集）
-        launch_watch.update_watchlist(deep.last_pool)
         manager.broadcast(
             "scan:report",
             {
