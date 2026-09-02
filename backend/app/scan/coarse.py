@@ -17,6 +17,7 @@ class CoarseScanner:
     def __init__(self, fetcher) -> None:
         self.fetcher = fetcher
         self._prev_pool: set[str] = set()
+        self.last_pool: list[str] = []   # 最近一次成功粗筛的候选池（status 展示用，1 分钟粒度）
 
     def scan(self) -> list[str]:
         tickers = self.fetcher.fetch_24h_tickers()
@@ -47,6 +48,7 @@ class CoarseScanner:
         pool |= db.get_watchlist()  # 自选币常驻候选池
 
         self._log_changes(pool)
+        self.last_pool = sorted(pool)
         return sorted(pool)
 
     def _log_changes(self, pool: set[str]) -> None:

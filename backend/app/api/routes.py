@@ -89,18 +89,26 @@ def status(request: Request) -> dict:
     jobs = []
     for job in sched.get_jobs():
         jobs.append({"id": job.id, "next_run": str(job.next_run_time) if job.next_run_time else None})
+    # 候选池优先取粗筛最新结果（1 分钟粒度、失败沿用上一轮；深扫 K 线拉取慢不阻塞展示）
+    coarse_scan = getattr(request.app.state, "coarse", None)
+    pool = list(getattr(coarse_scan, "last_pool", []) or []) if coarse_scan else []
+    if not pool:
+        pool = list(getattr(deep, "last_pool", []) or [])
+    launch_watch = getattr(request.app.state, "launch_watch", None)
     return {
         "version": "0.3.0",
         "scheduler_running": sched.running,
         "jobs": jobs,
         "ws_connections": manager.count,
-        "candidate_count": len(getattr(deep, "last_pool", []) or []),
-        "candidates": list(getattr(deep, "last_pool", []) or []),
+        "candidate_count": len(pool),
+        "candidates": pool,
         "rejections": dict(getattr(getattr(deep, "engine", None), "rejections", {}) or {}),
         "last_scan_ts": getattr(deep, "last_scan_ts", None),
         "market_env": getattr(deep, "last_market_env", None),
         "macro_silence": macro.in_silence_window(),
         "next_macro_event": macro.next_macro_event(),
+        "launch_pool_size": len(getattr(launch_watch, "l1l2_pool", set()) or set()) if launch_watch else 0,
+        "launch_pool": sorted(getattr(launch_watch, "l1l2_pool", set()) or set()) if launch_watch else [],
         "proxy": config.PROXY,
     }
 
