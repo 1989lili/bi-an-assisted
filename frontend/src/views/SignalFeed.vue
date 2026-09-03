@@ -67,6 +67,29 @@
       </div>
     </div>
 
+    <!-- 启动感知监控池（成交额20~220实时监听，默认折叠） -->
+    <div class="pool launch-pool" v-if="launchWatchlist.length">
+      <div class="pool-head" @click="showLaunch = !showLaunch">
+        <span>🚀 启动感知池（24h成交额排名20~220，实时监听）</span>
+        <span class="pool-toggle">
+          共 {{ launchWatchlist.length }} 币 · 观察 {{ launchPool.length }} 币
+          <van-icon :name="showLaunch ? 'arrow-up' : 'arrow-down'" />
+        </span>
+      </div>
+      <div class="launch-watch-line" v-if="launchPool.length">
+        <span class="launch-watch-label">L3实时观察：</span>
+        <span v-for="s in launchPool" :key="s" class="chip watch">{{ shortSymbol(s) }}</span>
+      </div>
+      <div class="launch-watch-line dim" v-else>观察集为空：等待 1h K 线收盘评估 L1+L2（新入池标的已启动初始评估）</div>
+      <template v-if="showLaunch">
+        <div class="pool-chips">
+          <span v-for="s in launchWatchlist" :key="s" class="chip" :class="{ watch: launchPool.includes(s) }">
+            {{ shortSymbol(s) }}
+          </span>
+        </div>
+      </template>
+    </div>
+
     <!-- 信号列表：仅显示有效信号（离场/过期自动隐藏） -->
     <van-empty v-if="!loading && signals.length === 0" description="暂无信号（引擎持续监控中，触发后实时推送）" />
     <div v-for="card in activeSignals" :key="card.id" class="signal-item" :class="{ fresh: card.id === newestId }">
@@ -90,6 +113,9 @@ const macroSilence = ref(false);
 const nextEvent = ref(null);
 const reportTs = ref(0);
 const reportCandidates = ref([]);
+const launchWatchlist = ref([]);
+const launchPool = ref([]);
+const showLaunch = ref(false);
 const reportSignalCount = ref(0);
 const rejections = ref({});
 const showPool = ref(false);   // 候选池币种列表默认折叠
@@ -135,6 +161,8 @@ function applyReport(data) {
   if (!data) return;
   if (data.ts) reportTs.value = data.ts;
   if (Array.isArray(data.candidates)) reportCandidates.value = data.candidates;
+  if (Array.isArray(data.launch_watchlist)) launchWatchlist.value = data.launch_watchlist;
+  if (Array.isArray(data.launch_pool)) launchPool.value = data.launch_pool;
   if (data.signal_count != null) reportSignalCount.value = data.signal_count;
   if (data.rejections) rejections.value = data.rejections;
   if (data.market_env) env.value = { ...data.market_env, ts: data.ts };
@@ -162,6 +190,8 @@ async function refresh() {
       market_env: st.market_env,
       macro_silence: st.macro_silence,
       next_macro_event: st.next_macro_event,
+      launch_watchlist: st.launch_watchlist,
+      launch_pool: st.launch_pool,
     });
   } catch (e) {
     console.error("加载信号失败", e);
@@ -253,6 +283,18 @@ onUnmounted(() => clearInterval(timer));
   background: #2c2c2e; color: #e8e8ea;
 }
 .chip.rejected { background: rgba(255, 159, 28, 0.1); color: #ff9f1c; }
+.chip.watch { background: rgba(255, 159, 28, 0.16); color: #ffb84d; border: 1px solid rgba(255, 159, 28, 0.4); }
+/* 启动感知池区块 */
+.pool.launch-pool {
+  border: 1px solid rgba(255, 159, 28, 0.28);
+  background: linear-gradient(135deg, rgba(255, 159, 28, 0.06), #1c1c1e);
+}
+.launch-watch-line {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 12px; margin: 6px 0;
+}
+.launch-watch-label { color: #ff9f1c; font-weight: 600; flex-shrink: 0; }
+.launch-watch-line.dim { color: #8e8e93; }
 .rejections {
   margin-top: 8px; border-top: 1px solid #2c2c2e; padding-top: 8px;
   max-height: 260px; overflow-y: auto;

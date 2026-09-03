@@ -65,6 +65,8 @@ async def lifespan(app: FastAPI):
                 "rejections": dict(deep.engine.rejections),
                 "launch_pool_size": len(launch_watch.l1l2_pool),
                 "launch_pool": sorted(launch_watch.l1l2_pool),
+                "launch_watchlist_size": len(launch_watch.watchlist),
+                "launch_watchlist": sorted(launch_watch.watchlist),
             },
         )
 

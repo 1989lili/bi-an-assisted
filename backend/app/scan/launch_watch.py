@@ -67,7 +67,8 @@ class LaunchSenseWatcher:
             tickers = self.fetcher.fetch_24h_tickers()
             if not tickers:
                 return
-            # 按 24h 成交额降序，取指定排名区间
+            # 仅 USDT 计价合约（与套1/策略一主口径一致），按 24h 成交额降序取指定排名区间
+            tickers = {k: v for k, v in tickers.items() if str(k).endswith(":USDT")}
             ranked = sorted(
                 tickers.items(),
                 key=lambda kv: float((kv[1] or {}).get("quoteVolume") or 0),

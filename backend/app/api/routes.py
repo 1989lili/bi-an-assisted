@@ -109,6 +109,8 @@ def status(request: Request) -> dict:
         "next_macro_event": macro.next_macro_event(),
         "launch_pool_size": len(getattr(launch_watch, "l1l2_pool", set()) or set()) if launch_watch else 0,
         "launch_pool": sorted(getattr(launch_watch, "l1l2_pool", set()) or set()) if launch_watch else [],
+        "launch_watchlist_size": len(getattr(launch_watch, "watchlist", set()) or set()) if launch_watch else 0,
+        "launch_watchlist": sorted(getattr(launch_watch, "watchlist", set()) or set()) if launch_watch else [],
         "proxy": config.PROXY,
     }
 
